@@ -22,6 +22,7 @@ ui_*.h
 # Third-party source archives
 third_party/*.tar.gz
 third_party/libssh2-build/
+third_party/rpc-framework/
 
 # Compiled libraries
 *.a
