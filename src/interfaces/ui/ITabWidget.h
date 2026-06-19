@@ -3,7 +3,7 @@
 
 #include <QString>
 
-class MyTextEdit;
+class IEditorEdit;
 
 /// @brief 标签页组件抽象接口
 /// 定义多文件标签页管理的核心能力
@@ -22,8 +22,8 @@ public:
     /// 关闭当前标签页
     virtual bool closeCurrentTab() = 0;
 
-    /// 获取当前活跃编辑器
-    virtual MyTextEdit* currentEditor() const = 0;
+    /// 获取当前活跃编辑器（通过 IEditorEdit 接口解耦）
+    virtual IEditorEdit* currentEditor() const = 0;
 
     /// 获取标签页数量
     virtual int tabCount() const = 0;

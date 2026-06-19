@@ -39,7 +39,7 @@ private:
 // ============================================================
 
 SftpClient::SftpClient(SshClient* sshClient, QObject* parent)
-    : QObject(parent)
+    : ISftpClient(parent)
     , m_sshClient(sshClient)
 {
 }

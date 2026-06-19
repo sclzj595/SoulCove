@@ -1201,7 +1201,7 @@ void Widget::saveCurrentFileDirect()
         QString savedContent = m_currentTextEdit->toPlainText();
         QTimer::singleShot(0, this, [this, currentPath, savedContent]() {
             if (!m_tabBar) return;
-            MyTextEdit* ed = m_tabBar->currentEditor();
+            MyTextEdit* ed = static_cast<MyTextEdit*>(m_tabBar->currentEditor());
             if (!ed) return;
             if (m_tabBar->currentFilePath() != currentPath) return;
 
@@ -1347,7 +1347,7 @@ void Widget::onFileOpenFromSidebar(const QString& filePath)
         // 使用 QTimer::singleShot(0) 确保 editor 已完成 enableSyntaxHighlighting 后再设置
         QTimer::singleShot(0, this, [this, filePath, content]() {
             if (!m_tabBar) return;
-            MyTextEdit* ed = m_tabBar->currentEditor();
+            MyTextEdit* ed = static_cast<MyTextEdit*>(m_tabBar->currentEditor());
             if (!ed) return;
             // 仅当当前标签页对应刚打开的文件时才应用（防止快速切换标签页错位）
             if (m_tabBar->currentFilePath() != filePath) return;

@@ -155,7 +155,7 @@ void GitPanel::refresh()
 
     // 更新文件状态树
     m_fileTree->clear();
-    QList<GitManager::FileStatus> statuses = git.fileStatuses();
+    QList<GitFileStatus> statuses = git.fileStatuses();
 
     if (statuses.isEmpty()) {
         m_statusLabel->setText(tr("✅ 工作区干净，没有更改"));
@@ -163,38 +163,38 @@ void GitPanel::refresh()
     }
 
     for (const auto& fs : statuses) {
-        createFileItem(fs.filePath, static_cast<FileStatusType::Status>(fs.status));
+        createFileItem(fs.filePath, fs.status);
     }
 
     m_statusLabel->setText(tr("共 %1 个文件有更改").arg(statuses.size()));
 }
 
-QString GitPanel::statusText(FileStatusType::Status status) const
+QString GitPanel::statusText(GitFileStatus::Status status) const
 {
     switch (status) {
-    case FileStatusType::Modified:  return tr("Modified");
-    case FileStatusType::Added:     return tr("Added");
-    case FileStatusType::Deleted:   return tr("Deleted");
-    case FileStatusType::Renamed:   return tr("Renamed");
-    case FileStatusType::Untracked: return tr("Untracked");
+    case GitFileStatus::Modified:  return tr("Modified");
+    case GitFileStatus::Added:     return tr("Added");
+    case GitFileStatus::Deleted:   return tr("Deleted");
+    case GitFileStatus::Renamed:   return tr("Renamed");
+    case GitFileStatus::Untracked: return tr("Untracked");
     default:                                return QString();
     }
 }
 
-QString GitPanel::statusIcon(FileStatusType::Status status) const
+QString GitPanel::statusIcon(GitFileStatus::Status status) const
 {
     switch (status) {
-    case FileStatusType::Modified:  return QStringLiteral(" M ");
-    case FileStatusType::Added:     return QStringLiteral(" A ");
-    case FileStatusType::Deleted:   return QStringLiteral(" D ");
-    case FileStatusType::Renamed:   return QStringLiteral(" R ");
-    case FileStatusType::Untracked: return QStringLiteral("?? ");
+    case GitFileStatus::Modified:  return QStringLiteral(" M ");
+    case GitFileStatus::Added:     return QStringLiteral(" A ");
+    case GitFileStatus::Deleted:   return QStringLiteral(" D ");
+    case GitFileStatus::Renamed:   return QStringLiteral(" R ");
+    case GitFileStatus::Untracked: return QStringLiteral("?? ");
     default:                                return QStringLiteral("   ");
     }
 }
 
 QTreeWidgetItem* GitPanel::createFileItem(const QString& filePath,
-                                           FileStatusType::Status status)
+                                           GitFileStatus::Status status)
 {
     auto* item = new QTreeWidgetItem(m_fileTree);
     item->setText(0, statusIcon(status) + statusText(status));
@@ -205,11 +205,11 @@ QTreeWidgetItem* GitPanel::createFileItem(const QString& filePath,
     // 根据状态设置颜色
     QColor color;
     switch (status) {
-    case FileStatusType::Modified:  color = QColor(220, 180, 50);  break;  // 黄色
-    case FileStatusType::Added:     color = QColor(80, 180, 80);    break;  // 绿色
-    case FileStatusType::Deleted:   color = QColor(200, 80, 80);    break;  // 红色
-    case FileStatusType::Renamed:   color = QColor(80, 150, 220);   break;  // 蓝色
-    case FileStatusType::Untracked: color = QColor(160, 140, 120);  break;  // 灰色
+    case GitFileStatus::Modified:  color = QColor(220, 180, 50);  break;  // 黄色
+    case GitFileStatus::Added:     color = QColor(80, 180, 80);    break;  // 绿色
+    case GitFileStatus::Deleted:   color = QColor(200, 80, 80);    break;  // 红色
+    case GitFileStatus::Renamed:   color = QColor(80, 150, 220);   break;  // 蓝色
+    case GitFileStatus::Untracked: color = QColor(160, 140, 120);  break;  // 灰色
     default: break;
     }
     item->setForeground(0, color);
@@ -322,8 +322,8 @@ void GitPanel::onStageClicked()
     int status = item->data(1, Qt::UserRole).toInt();
     auto& git = GitManager::instance();
 
-    if (static_cast<FileStatusType::Status>(status) == FileStatusType::Untracked ||
-        static_cast<FileStatusType::Status>(status) == FileStatusType::Modified) {
+    if (static_cast<GitFileStatus::Status>(status) == GitFileStatus::Untracked ||
+        static_cast<GitFileStatus::Status>(status) == GitFileStatus::Modified) {
         git.stageFile(filePath);
     } else {
         git.unstageFile(filePath);

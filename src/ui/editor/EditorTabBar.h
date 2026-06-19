@@ -11,6 +11,7 @@
 
 class MyTextEdit;
 class ICompleter;
+class IEditorEdit;
 
 /// @brief 编辑器标签页数据结构
 struct TabData {
@@ -75,8 +76,8 @@ public:
     /// @brief 切换到指定标签页
     void switchToTab(int index);
 
-    /// @brief 获取当前活跃的编辑器
-    MyTextEdit* currentEditor() const override;
+    /// @brief 获取当前活跃的编辑器（通过接口返回，解耦具体实现）
+    IEditorEdit* currentEditor() const override;
 
     /// @brief 获取当前标签页索引
     int currentIndex() const { return m_tabBar->currentIndex(); }

@@ -11,7 +11,7 @@ SshSessionManager& SshSessionManager::instance()
 }
 
 SshSessionManager::SshSessionManager(QObject* parent)
-    : QObject(parent)
+    : IRemoteClient(parent)
 {
     loadSavedConfigs();
 }
@@ -63,7 +63,7 @@ void SshSessionManager::removeConnection(const QString& connectionId)
     emit connectionRemoved(connectionId);
 }
 
-SshClient* SshSessionManager::client(const QString& connectionId) const
+ISshClient* SshSessionManager::client(const QString& connectionId) const
 {
     return m_clients.value(connectionId, nullptr);
 }

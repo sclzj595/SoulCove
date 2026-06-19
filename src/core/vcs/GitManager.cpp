@@ -7,7 +7,7 @@
 // ========== 单例 ==========
 
 GitManager::GitManager()
-    : QObject(nullptr)
+    : IGitManager(nullptr)
 {
 }
 
@@ -104,17 +104,17 @@ QStringList GitManager::branches() const
 
 QStringList GitManager::changedFiles() const
 {
-    QList<FileStatus> statuses = const_cast<GitManager*>(this)->fileStatuses();
+    QList<GitFileStatus> statuses = const_cast<GitManager*>(this)->fileStatuses();
     QStringList files;
-    for (const FileStatus& fs : statuses) {
+    for (const GitFileStatus& fs : statuses) {
         files.append(fs.filePath);
     }
     return files;
 }
 
-QList<GitManager::FileStatus> GitManager::fileStatuses()
+QList<GitFileStatus> GitManager::fileStatuses()
 {
-    QList<FileStatus> result;
+    QList<GitFileStatus> result;
 
     auto output = runGitCommand({QStringLiteral("status"), QStringLiteral("--porcelain")});
     if (output.isEmpty())
@@ -123,7 +123,7 @@ QList<GitManager::FileStatus> GitManager::fileStatuses()
     for (const QString& line : output.split(QLatin1Char('\n'))) {
         if (line.length() < 3) continue;
 
-        FileStatus fs;
+        GitFileStatus fs;
         char indexStatus = line[0].toLatin1();   // 暂存区状态
         char workStatus  = line[1].toLatin1();   // 工作区状态
         QString filePath = line.mid(3).trimmed();
@@ -138,17 +138,17 @@ QList<GitManager::FileStatus> GitManager::fileStatuses()
 
         // 判断最终状态（优先暂存区状态）
         if (workStatus == '?') {
-            fs.status = FileStatus::Untracked;
+            fs.status = GitFileStatus::Untracked;
         } else if (indexStatus == 'D' || workStatus == 'D') {
-            fs.status = FileStatus::Deleted;
+            fs.status = GitFileStatus::Deleted;
         } else if (indexStatus == 'A') {
-            fs.status = FileStatus::Added;
+            fs.status = GitFileStatus::Added;
         } else if (indexStatus == 'R' || indexStatus == 'C') {
-            fs.status = FileStatus::Renamed;
+            fs.status = GitFileStatus::Renamed;
         } else if (indexStatus == 'M' || workStatus == 'M') {
-            fs.status = FileStatus::Modified;
+            fs.status = GitFileStatus::Modified;
         } else {
-            fs.status = FileStatus::Unmodified;
+            fs.status = GitFileStatus::Unmodified;
         }
 
         result.append(fs);

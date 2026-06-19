@@ -1,12 +1,13 @@
 #ifndef REMOTEFILETREE_H
 #define REMOTEFILETREE_H
 
+#include "interfaces/remote/ISftpClient.h"
+
 #include <QTreeWidget>
 #include <QMap>
 
 class SftpClient;
 class SshClient;
-struct SftpFileInfo;
 
 /// @brief 远程文件树 — SFTP 远程文件浏览器
 ///

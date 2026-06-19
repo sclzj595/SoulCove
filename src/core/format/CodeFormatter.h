@@ -1,14 +1,16 @@
 #ifndef CODEFORMATTER_H
 #define CODEFORMATTER_H
 
+#include "interfaces/format/ICodeFormatter.h"
+
 #include <QObject>
-#include <QString>
 #include <QProcess>
 
 /// @brief 代码格式化器（单例）
 /// 优先使用 clang-format 进行格式化，若不可用则使用内置简单格式化
 /// 支持 Ctrl+Shift+I 快捷键触发
-class CodeFormatter : public QObject
+/// 实现 ICodeFormatter 接口（依赖倒置原则）
+class CodeFormatter : public QObject, public ICodeFormatter
 {
     Q_OBJECT
 public:
@@ -16,19 +18,14 @@ public:
     static CodeFormatter& instance();
 
     /// 格式化文本内容，返回格式化后的文本
-    /// 如果 clang-format 不可用，使用内置缩进格式化
-    /// @param code      待格式化的代码文本
-    /// @param filePath  文件路径（用于 clang-format --assume-filename）
-    /// @return 格式化后的文本
-    QString format(const QString& code, const QString& filePath = QString());
+    QString format(const QString& code, const QString& filePath = QString()) override;
 
     /// 检查 clang-format 是否可用
-    bool isClangFormatAvailable() const;
+    bool isClangFormatAvailable() const override;
 
     /// 设置缩进风格（用于内置格式化）
-    enum class IndentStyle { Spaces, Tabs };
-    void setIndentStyle(IndentStyle style);
-    void setIndentSize(int size);
+    void setIndentStyle(IndentStyle style) override;
+    void setIndentSize(int size) override;
 
 private:
     CodeFormatter();

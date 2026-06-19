@@ -552,7 +552,7 @@ void EditorTabBar::switchToTab(int index)
     }
 }
 
-MyTextEdit* EditorTabBar::currentEditor() const
+IEditorEdit* EditorTabBar::currentEditor() const
 {
     int idx = m_tabBar->currentIndex();
     if (idx < 0) return nullptr;

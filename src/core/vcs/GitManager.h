@@ -1,15 +1,14 @@
 #ifndef GITMANAGER_H
 #define GITMANAGER_H
 
-#include <QObject>
-#include <QString>
-#include <QStringList>
-#include <QList>
+#include "interfaces/vcs/IGitManager.h"
+
 #include <QProcess>
 
 /// @brief Git 版本控制管理器（轻量 git.exe 方案）
 /// 通过 QProcess 调用 git 命令行工具，提供仓库状态查询和基本操作
-class GitManager : public QObject
+/// 实现 IGitManager 接口（依赖倒置原则）
+class GitManager : public IGitManager
 {
     Q_OBJECT
 
@@ -17,35 +16,25 @@ public:
     static GitManager& instance();
 
     /// 设置工作目录（仓库路径）
-    void setWorkingDirectory(const QString& path);
+    void setWorkingDirectory(const QString& path) override;
 
     // === 仓库状态 ===
-    bool isGitRepo() const;
-    QString currentBranch() const;
-    QStringList branches() const;           // 所有分支
-    QStringList changedFiles() const;       // 修改的文件列表
-
-    struct FileStatus {
-        QString filePath;
-        enum Status { Unmodified, Modified, Added, Deleted, Renamed, Untracked } status;
-    };
-    QList<FileStatus> fileStatuses();      // 详细文件状态
+    bool isGitRepo() const override;
+    QString currentBranch() const override;
+    QStringList branches() const override;
+    QStringList changedFiles() const override;
+    QList<GitFileStatus> fileStatuses() override;
 
     // === 操作 ===
-    bool checkoutBranch(const QString& branch);
-    bool stageFile(const QString& filePath);
-    bool unstageFile(const QString& filePath);
-    bool commit(const QString& message);
-    bool discardChanges(const QString& filePath);
-    QString diff(const QString& filePath = QString());  // 返回diff文本
-    QString log(int count = 10);              // 最近N条提交
-    bool pull();
-    bool push();
-
-signals:
-    void repoChanged();          // 仓库状态变化
-    void operationStarted(const QString& op);
-    void operationFinished(const QString& op, bool success, const QString& output);
+    bool checkoutBranch(const QString& branch) override;
+    bool stageFile(const QString& filePath) override;
+    bool unstageFile(const QString& filePath) override;
+    bool commit(const QString& message) override;
+    bool discardChanges(const QString& filePath) override;
+    QString diff(const QString& filePath = QString()) override;
+    QString log(int count = 10) override;
+    bool pull() override;
+    bool push() override;
 
 private:
     GitManager();

@@ -152,7 +152,10 @@ set(SOURCES
 
     # ===== interfaces/ 接口层（MOC触发文件）=====
     src/interfaces/remote/ISshClient.cpp      # ISshClient MOC触发（纯接口类信号需要MOC）
+    src/interfaces/remote/ISftpClient.cpp     # ISftpClient MOC触发（SFTP客户端抽象接口）
+    src/interfaces/remote/IRemoteClient.cpp   # IRemoteClient MOC触发（远程会话管理抽象接口）
     src/interfaces/lsp/ILspClient.cpp         # ILspClient MOC触发（LSP客户端抽象接口）
+    src/interfaces/vcs/IGitManager.cpp        # IGitManager MOC触发（Git版本控制抽象接口）
 
     # ===== factory/ 工厂层 =====
     src/factory/UIFactory.cpp                 # UI组件工厂

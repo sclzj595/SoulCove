@@ -1,15 +1,14 @@
 #ifndef GITPANEL_H
 #define GITPANEL_H
 
+#include "interfaces/vcs/IGitManager.h"
+
 #include <QWidget>
 #include <QTreeWidget>
 #include <QComboBox>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QLabel>
-
-class GitPanel;
-using FileStatusType = struct { enum Status { Unmodified, Modified, Added, Deleted, Renamed, Untracked }; };
 
 /// @brief 源代码管理面板（Git 集成 UI）
 /// 显示分支、文件状态、diff，支持基本 Git 操作
@@ -42,9 +41,9 @@ private slots:
 private:
     void setupUi();
     QTreeWidgetItem* createFileItem(const QString& filePath,
-                                     FileStatusType::Status status);
-    QString statusText(FileStatusType::Status status) const;
-    QString statusIcon(FileStatusType::Status status) const;
+                                     GitFileStatus::Status status);
+    QString statusText(GitFileStatus::Status status) const;
+    QString statusIcon(GitFileStatus::Status status) const;
 
     // === UI 组件 ===
     QLabel*        m_branchLabel;       // 当前分支标签
