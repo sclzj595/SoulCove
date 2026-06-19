@@ -2054,6 +2054,131 @@ void Widget::setupCommandPalette()
     // 连接信号
     connect(m_commandPalette, &CommandPalette::commandTriggered,
             this, &Widget::onCommandTriggered);
+
+    // 注册命令处理器到 CommandRegistry（哈希表替代 if-else 链）
+    registerCommands();
+}
+
+void Widget::registerCommands()
+{
+    // === 文件类 ===
+    m_commandRegistry.registerCommand(QStringLiteral("file.open"),    [this]{ on_btnOpen_clicked(); });
+    m_commandRegistry.registerCommand(QStringLiteral("file.new"),     [this]{ on_btnNew_clicked(); });
+    m_commandRegistry.registerCommand(QStringLiteral("file.save"),    [this]{ saveCurrentFileDirect(); });
+    m_commandRegistry.registerCommand(QStringLiteral("file.saveAs"),  [this]{
+        if (!m_currentTextEdit) return;
+        if (m_tabBar) m_tabBar->setCurrentFilePath(QString());
+        on_btnSave_clicked();
+    });
+
+    // === 编辑类 ===
+    m_commandRegistry.registerCommand(QStringLiteral("edit.undo"), [this]{
+        QKeyEvent* e = new QKeyEvent(QEvent::KeyPress, Qt::Key_Z, Qt::ControlModifier);
+        QCoreApplication::postEvent(m_currentTextEdit ? m_currentTextEdit->asWidget() : this, e);
+    });
+    m_commandRegistry.registerCommand(QStringLiteral("edit.redo"), [this]{
+        QKeyEvent* e = new QKeyEvent(QEvent::KeyPress, Qt::Key_Y, Qt::ControlModifier);
+        QCoreApplication::postEvent(m_currentTextEdit ? m_currentTextEdit->asWidget() : this, e);
+    });
+    m_commandRegistry.registerCommand(QStringLiteral("edit.find"),       [this]{ onFindRequested(); });
+    m_commandRegistry.registerCommand(QStringLiteral("edit.replace"),    [this]{ onReplaceRequested(); });
+    m_commandRegistry.registerCommand(QStringLiteral("edit.format"),     [this]{ onFormatDocument(); });
+    m_commandRegistry.registerCommand(QStringLiteral("edit.doxygen"), [this]{
+        auto* ed = qobject_cast<MyTextEdit*>(m_currentTextEdit ? m_currentTextEdit->asWidget() : nullptr);
+        if (ed) ed->insertDoxygenComment();
+    });
+    m_commandRegistry.registerCommand(QStringLiteral("edit.comment"),    [this]{ onToggleLineComment(); });
+    m_commandRegistry.registerCommand(QStringLiteral("edit.copyPath"),   [this]{ onCopyFilePath(); });
+    m_commandRegistry.registerCommand(QStringLiteral("edit.upper"),      [this]{ onToUpperCase(); });
+    m_commandRegistry.registerCommand(QStringLiteral("edit.lower"),      [this]{ onToLowerCase(); });
+    m_commandRegistry.registerCommand(QStringLiteral("edit.openFolder"), [this]{ onOpenInFolder(); });
+
+    // === 视图类 ===
+    m_commandRegistry.registerCommand(QStringLiteral("view.toggleSidebar"), [this]{
+        if (m_sideBar) m_sideBar->setVisible(!m_sideBar->isVisible());
+    });
+    m_commandRegistry.registerCommand(QStringLiteral("view.toggleTerminal"), [this]{ onToggleTerminal(); });
+    m_commandRegistry.registerCommand(QStringLiteral("view.toggleWelcome"), [this]{
+        if (m_welcomePage) m_welcomePage->setVisible(!m_welcomePage->isVisible());
+    });
+    m_commandRegistry.registerCommand(QStringLiteral("view.diffCompare"), [this]{
+        QString path1 = QFileDialog::getOpenFileName(this, tr("选择原始文件"));
+        if (path1.isEmpty()) return;
+        QString path2 = QFileDialog::getOpenFileName(this, tr("选择修改后文件"));
+        if (path2.isEmpty()) return;
+        openDiffView(path1, path2);
+    });
+
+    // === 终端类 ===
+    m_commandRegistry.registerCommand(QStringLiteral("term.new"),    [this]{ if (m_terminal) m_terminal->startSession(); });
+    m_commandRegistry.registerCommand(QStringLiteral("term.clear"),  [this]{ if (m_terminal) m_terminal->executeCommand(QStringLiteral("cls")); });
+    m_commandRegistry.registerCommand(QStringLiteral("term.switchType"), []{ LOG_DEBUG("[CommandPalette] 切换Shell类型（待实现）"); });
+
+    // === 设置类 ===
+    m_commandRegistry.registerCommand(QStringLiteral("settings.open"), [this]{ onSettingsClicked(); });
+
+    // === 主题/退出 ===
+    m_commandRegistry.registerCommand(QStringLiteral("theme.next"), [this]{
+        auto& tm = ThemeManager::instance();
+        QStringList keys = tm.themeKeys();
+        int idx = keys.indexOf(ConfigManager::instance().theme());
+        int nextIdx = (idx + 1) % keys.size();
+        tm.switchTheme(keys[nextIdx]);
+        ConfigManager::instance().setTheme(keys[nextIdx]);
+    });
+    m_commandRegistry.registerCommand(QStringLiteral("exit"), [this]{ close(); });
+
+    // === 工具类 ===
+    m_commandRegistry.registerCommand(QStringLiteral("tools.regexTester"), [this]{
+        auto* regexTester = new RegexTester();
+        if (m_welcomePage) m_welcomePage->hide();
+        m_tabBar->addCustomTab(regexTester, tr("正则测试器"), true);
+    });
+
+    // === 代码片段 ===
+    m_commandRegistry.registerCommand(QStringLiteral("snippet.manage"), [this]{
+        auto& sm = SnippetManager::instance();
+        QList<CodeSnippet> snippets = sm.allSnippets();
+        QStringList items;
+        for (const CodeSnippet& s : snippets) {
+            items.append(QStringLiteral("[%1] %2 - %3").arg(s.language, s.prefix, s.name));
+        }
+        bool ok = false;
+        QString selected = ModernDialog::getItem(this, tr("代码片段"),
+            tr("选择一个片段（%1 个可用）:").arg(snippets.size()), items, 0, &ok);
+        if (ok && !selected.isEmpty()) {
+            int idx = items.indexOf(selected);
+            if (idx >= 0 && idx < snippets.size()) {
+                QString expanded = sm.expandSnippet(snippets[idx]);
+                if (m_currentTextEdit) m_currentTextEdit->textCursor().insertText(expanded);
+            }
+        }
+    });
+    m_commandRegistry.registerPrefixCommand(QStringLiteral("snippet.insert:"), [this](const QString& keyword){
+        auto& sm = SnippetManager::instance();
+        QList<CodeSnippet> results = sm.search(keyword);
+        if (results.isEmpty()) {
+            ModernDialog::information(this, tr("代码片段"),
+                tr("未找到匹配 \"%1\" 的片段").arg(keyword));
+            return;
+        }
+        QStringList items;
+        for (const CodeSnippet& s : results) {
+            items.append(QStringLiteral("%1 [%2] %3").arg(s.name, s.language, s.prefix));
+        }
+        bool ok = false;
+        QString selected = ModernDialog::getItem(this, tr("插入代码片段"),
+            tr("选择要插入的片段:"), items, 0, &ok);
+        if (ok && !selected.isEmpty()) {
+            int idx = items.indexOf(selected);
+            if (idx >= 0 && idx < results.size()) {
+                QString expanded = sm.expandSnippet(results[idx]);
+                if (m_currentTextEdit) m_currentTextEdit->textCursor().insertText(expanded);
+            }
+        }
+    });
+
+    LOG_INFO("[Widget] CommandRegistry 已注册" << m_commandRegistry.commandIds().size() << "个命令");
 }
 
 void Widget::onToggleCommandPalette()
@@ -2070,187 +2195,7 @@ void Widget::onToggleCommandPalette()
 void Widget::onCommandTriggered(const QString& commandId)
 {
     LOG_DEBUG("[CommandPalette] 命令触发:" << commandId);
-
-    // === 文件类 ===
-    if (commandId == QStringLiteral("file.open")) {
-        on_btnOpen_clicked();
-    }
-    else if (commandId == QStringLiteral("file.new")) {
-        on_btnNew_clicked();
-    }
-    else if (commandId == QStringLiteral("file.save")) {
-        saveCurrentFileDirect();
-    }
-    else if (commandId == QStringLiteral("file.saveAs")) {
-        // 另存为：先确保有编辑器，然后走保存逻辑中的另存为分支
-        if (!m_currentTextEdit) return;
-        // 清空当前路径以触发另存为逻辑
-        if (m_tabBar) m_tabBar->setCurrentFilePath(QString());
-        on_btnSave_clicked();
-    }
-
-    // === 编辑类 ===
-    else if (commandId == QStringLiteral("edit.undo")) {
-        if (m_currentTextEdit) m_currentTextEdit->asWidget()->focusWidget();
-        // 发送撤销快捷键到当前编辑器
-        QKeyEvent* undoEvent = new QKeyEvent(QEvent::KeyPress, Qt::Key_Z, Qt::ControlModifier);
-        QCoreApplication::postEvent(m_currentTextEdit ? m_currentTextEdit->asWidget() : this, undoEvent);
-    }
-    else if (commandId == QStringLiteral("edit.redo")) {
-        QKeyEvent* redoEvent = new QKeyEvent(QEvent::KeyPress, Qt::Key_Y, Qt::ControlModifier);
-        QCoreApplication::postEvent(m_currentTextEdit ? m_currentTextEdit->asWidget() : this, redoEvent);
-    }
-    else if (commandId == QStringLiteral("edit.find")) {
-        onFindRequested();
-    }
-    else if (commandId == QStringLiteral("edit.replace")) {
-        onReplaceRequested();
-    }
-    else if (commandId == QStringLiteral("edit.format")) {
-        onFormatDocument();
-    }
-    else if (commandId == QStringLiteral("edit.doxygen")) {
-        auto* ed = qobject_cast<MyTextEdit*>(
-            m_currentTextEdit ? m_currentTextEdit->asWidget() : nullptr);
-        if (ed) ed->insertDoxygenComment();
-    }
-    else if (commandId == QStringLiteral("edit.comment")) {
-        onToggleLineComment();
-    }
-    else if (commandId == QStringLiteral("edit.copyPath")) {
-        onCopyFilePath();
-    }
-    else if (commandId == QStringLiteral("edit.upper")) {
-        onToUpperCase();
-    }
-    else if (commandId == QStringLiteral("edit.lower")) {
-        onToLowerCase();
-    }
-    else if (commandId == QStringLiteral("edit.openFolder")) {
-        onOpenInFolder();
-    }
-
-    // === 视图类 ===
-    else if (commandId == QStringLiteral("view.toggleSidebar")) {
-        if (m_sideBar) {
-            bool visible = m_sideBar->isVisible();
-            m_sideBar->setVisible(!visible);
-        }
-    }
-    else if (commandId == QStringLiteral("view.toggleTerminal")) {
-        onToggleTerminal();
-    }
-    else if (commandId == QStringLiteral("view.toggleWelcome")) {
-        if (m_welcomePage) {
-            m_welcomePage->setVisible(!m_welcomePage->isVisible());
-        }
-    }
-    else if (commandId == QStringLiteral("view.diffCompare")) {
-        // 文件对比：选择两个文件
-        QString path1 = QFileDialog::getOpenFileName(this, tr("选择原始文件"));
-        if (path1.isEmpty()) return;
-        QString path2 = QFileDialog::getOpenFileName(this, tr("选择修改后文件"));
-        if (path2.isEmpty()) return;
-        openDiffView(path1, path2);
-    }
-
-    // === 终端类 ===
-    else if (commandId == QStringLiteral("term.new")) {
-        if (m_terminal) m_terminal->startSession();
-    }
-    else if (commandId == QStringLiteral("term.clear")) {
-        if (m_terminal) m_terminal->executeCommand(QStringLiteral("cls"));
-    }
-    else if (commandId == QStringLiteral("term.switchType")) {
-        // 切换Shell类型（可扩展）
-        LOG_DEBUG("[CommandPalette] 切换Shell类型（待实现）");
-    }
-
-    // === 设置类 ===
-    else if (commandId == QStringLiteral("settings.open")) {
-        onSettingsClicked();
-    }
-
-    // === 其他 ===
-    else if (commandId == QStringLiteral("theme.next")) {
-        auto& tm = ThemeManager::instance();
-        QStringList keys = tm.themeKeys();
-        int idx = keys.indexOf(ConfigManager::instance().theme());
-        int nextIdx = (idx + 1) % keys.size();
-        tm.switchTheme(keys[nextIdx]);
-        ConfigManager::instance().setTheme(keys[nextIdx]);
-    }
-    else if (commandId == QStringLiteral("exit")) {
-        close();
-    }
-
-    // === M9: 正则表达式测试器 ===
-    else if (commandId == QStringLiteral("tools.regexTester")) {
-        auto* regexTester = new RegexTester();
-        // 在标签栏中打开
-        if (m_welcomePage) m_welcomePage->hide();
-        m_tabBar->addCustomTab(regexTester, tr("正则测试器"), true);
-    }
-
-    // === M14: 代码片段 ===
-    else if (commandId == QStringLiteral("snippet.manage")) {
-        // 显示片段列表对话框
-        auto& sm = SnippetManager::instance();
-        QList<CodeSnippet> snippets = sm.allSnippets();
-
-        QStringList items;
-        for (const CodeSnippet& s : snippets) {
-            items.append(QStringLiteral("[%1] %2 - %3").arg(s.language, s.prefix, s.name));
-        }
-
-        bool ok = false;
-        QString selected = ModernDialog::getItem(this, tr("代码片段"),
-            tr("选择一个片段（%1 个可用）:").arg(snippets.size()),
-            items, 0, &ok);
-
-        if (ok && !selected.isEmpty()) {
-            int idx = items.indexOf(selected);
-            if (idx >= 0 && idx < snippets.size()) {
-                const CodeSnippet& snip = snippets[idx];
-                QString expanded = sm.expandSnippet(snip);
-                if (m_currentTextEdit) {
-                    m_currentTextEdit->textCursor().insertText(expanded);
-                }
-            }
-        }
-    }
-    else if (commandId.startsWith(QStringLiteral("snippet.insert:"))) {
-        // 搜索并插入片段（命令ID格式: snippet.insert:关键词）
-        QString keyword = commandId.mid(QStringLiteral("snippet.insert:").length());
-        auto& sm = SnippetManager::instance();
-        QList<CodeSnippet> results = sm.search(keyword);
-
-        if (results.isEmpty()) {
-            ModernDialog::information(this, tr("代码片段"),
-                tr("未找到匹配 \"%1\" 的片段").arg(keyword));
-            return;
-        }
-
-        QStringList items;
-        for (const CodeSnippet& s : results) {
-            items.append(QStringLiteral("%1 [%2] %3").arg(s.name, s.language, s.prefix));
-        }
-
-        bool ok = false;
-        QString selected = ModernDialog::getItem(this, tr("插入代码片段"),
-            tr("选择要插入的片段:"), items, 0, &ok);
-
-        if (ok && !selected.isEmpty()) {
-            int idx = items.indexOf(selected);
-            if (idx >= 0 && idx < results.size()) {
-                const CodeSnippet& snip = results[idx];
-                QString expanded = sm.expandSnippet(snip);
-                if (m_currentTextEdit) {
-                    m_currentTextEdit->textCursor().insertText(expanded);
-                }
-            }
-        }
-    }
+    m_commandRegistry.execute(commandId);
 }
 
 // ========== M4: 代码格式化 ==========

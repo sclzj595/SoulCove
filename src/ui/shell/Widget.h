@@ -11,6 +11,7 @@
 #include "core/format/CodeFormatter.h"
 #include "ui/sidebar/GitPanel.h"
 #include "core/lsp/LspManager.h"
+#include "controller/CommandRegistry.h"
 
 #include "interfaces/core/IObserver.h"
 #include "interfaces/core/IFileOperator.h"
@@ -229,6 +230,7 @@ private:
 
     // === 命令面板 ===
     CommandPalette* m_commandPalette = nullptr;
+    CommandRegistry m_commandRegistry;  ///< 命令注册表（哈希表替代 if-else 链）
 
     // === 文件外部修改监听 (T18) ===
     QFileSystemWatcher* m_fileWatcher = nullptr;
@@ -248,6 +250,7 @@ private:
     void restoreWindowState();                     // 恢复窗口位置/大小
     void saveWindowState();                         // 保存窗口位置/大小
     void setupCommandPalette();                     // 初始化命令面板
+    void registerCommands();                         // 注册命令面板命令到 CommandRegistry
 };
 
 #endif // WIDGET_H

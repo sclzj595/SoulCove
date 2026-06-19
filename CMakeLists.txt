@@ -159,6 +159,9 @@ set(SOURCES
 
     # ===== factory/ 工厂层 =====
     src/factory/UIFactory.cpp                 # UI组件工厂
+
+    # ===== controller/ 控制器层 =====
+    src/controller/CommandRegistry.cpp        # 命令注册表（哈希表替代 if-else 链）
 )
 
 # 资源文件列表(图标、配置文件等)
