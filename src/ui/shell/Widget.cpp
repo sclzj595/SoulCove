@@ -8,6 +8,7 @@
 #include "core/shortcut/ShortcutFilter.h"
 #include "factory/UIFactory.h"
 #include "controller/EditorActions.h"
+#include "controller/FileController.h"
 #include "ui/settings/SettingsPage.h"
 #include "ui/tools/DiffViewer.h"
 #include "ui/tools/RegexTester.h"
@@ -217,11 +218,11 @@ Widget::Widget(QWidget *parent)
             }
             auto* dv = new DiffViewer();
             dv->setDiffContent(tr("（原始版本）"), diffText,
-                               QFileInfo(filePath).fileName(), tr("当前更改"));
+                               FileController::fileName(filePath), tr("当前更改"));
             connect(dv, &DiffViewer::diffClosed, this, [this]() {
                 if (m_tabBar) m_tabBar->closeCurrentTab();
             });
-            m_tabBar->addCustomTab(dv, tr("Diff: ") + QFileInfo(filePath).fileName(), true);
+            m_tabBar->addCustomTab(dv, tr("Diff: ") + FileController::fileName(filePath), true);
         });
     }
 
@@ -1079,13 +1080,9 @@ void Widget::on_btnOpen_clicked()
     );
     if (filename.isEmpty()) return;
 
-    // 直接读取文件内容交给TabBar创建标签页
-    QFile file(filename);
-    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QString content = QTextStream(&file).readAll();
-        file.close();
-        m_tabBar->openFileTab(filename, content);
-    }
+    // 通过 FileController 统一读取（自动编码检测）
+    QString content = FileController::readFile(filename);
+    m_tabBar->openFileTab(filename, content);
 }
 
 void Widget::on_btnSave_clicked()
@@ -1094,7 +1091,7 @@ void Widget::on_btnSave_clicked()
 
     // 点击保存按钮 → 弹出确认弹窗（用户明确操作，需确认）
     QString currentPath = m_tabBar->currentFilePath();
-    QString fileName = currentPath.isEmpty() ? tr("未命名文件") : QFileInfo(currentPath).fileName();
+    QString fileName = currentPath.isEmpty() ? tr("未命名文件") : FileController::fileName(currentPath);
 
     int result = ModernDialog::confirm(this, tr("scNotebook"), tr("是否保存当前文件的更改？"));
     if (result == ModernDialog::ROLE_REJECT) {
@@ -1143,14 +1140,9 @@ void Widget::saveCurrentFileDirect()
 
         m_fileOperator->setEncoding(m_comboBoxEncoding->currentText());
 
-        // 写入文件
-        QFile file(filename);
-        if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-            QTextStream out(&file);
-            out.setEncoding(QStringConverter::encodingForName(m_comboBoxEncoding->currentText().toUtf8()).value_or(QStringConverter::Utf8));
-            out << m_currentTextEdit->toPlainText();
-            file.close();
-        }
+        // 通过 FileController 统一写入
+        FileController::writeFile(filename, m_currentTextEdit->toPlainText(),
+                                  m_comboBoxEncoding->currentText());
 
         // 更新标签页路径
         m_tabBar->setCurrentFilePath(filename);
@@ -1166,16 +1158,9 @@ void Widget::saveCurrentFileDirect()
         LOG_DEBUG("[Widget] 直接保存文件:" << currentPath);
         // T18: 抑制文件监听（内部保存不应触发 reload 提示）
         m_suppressFileWatch = true;
-        QFile file(currentPath);
-        if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-            QTextStream out(&file);
-            out.setEncoding(QStringConverter::encodingForName(m_comboBoxEncoding->currentText().toUtf8()).value_or(QStringConverter::Utf8));
-            out << m_currentTextEdit->toPlainText();
-            out.flush();
-            file.close();
+        if (FileController::writeFile(currentPath, m_currentTextEdit->toPlainText(),
+                                      m_comboBoxEncoding->currentText())) {
             LOG_DEBUG("[Widget] 文件写入成功");
-        } else {
-            LOG_DEBUG("[Widget] 文件打开失败:" << file.errorString());
         }
 
         m_tabBar->setCurrentModified(false);
@@ -1250,7 +1235,7 @@ void Widget::onCurrentEditorChanged(MyTextEdit* editor)
             if (!m_fileWatcher->files().isEmpty())
                 m_fileWatcher->removePaths(m_fileWatcher->files());
             // 添加新文件
-            if (!filePath.isEmpty() && QFile::exists(filePath))
+            if (!filePath.isEmpty() && FileController::exists(filePath))
                 m_fileWatcher->addPath(filePath);
         }
     }
@@ -1299,7 +1284,7 @@ void Widget::onFileChangedExternally(const QString& path)
     if (m_suppressFileWatch) return;
 
     // 文件被删除
-    if (!QFile::exists(path)) {
+    if (!FileController::exists(path)) {
         LOG_DEBUG("[Widget] 文件被外部删除:" << path);
         return;
     }
@@ -1312,7 +1297,7 @@ void Widget::onFileChangedExternally(const QString& path)
     // 弹窗询问用户是否重新加载
     auto result = ModernDialog::question(
         this, tr("文件已修改"),
-        tr("文件 \"%1\" 已被外部程序修改。\n是否重新加载？").arg(QFileInfo(path).fileName())
+        tr("文件 \"%1\" 已被外部程序修改。\n是否重新加载？").arg(FileController::fileName(path))
     );
 
     if (result == ModernDialog::ROLE_ACCEPT) {
@@ -1337,45 +1322,43 @@ void Widget::onFileChangedExternally(const QString& path)
 void Widget::onFileOpenFromSidebar(const QString& filePath)
 {
     LOG_DEBUG("[Widget] 侧边栏打开文件:" << filePath);
-    QFile file(filePath);
-    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QString content = QTextStream(&file).readAll();
-        file.close();
-        m_tabBar->openFileTab(filePath, content);
+    QString content = FileController::readFile(filePath);
+    if (content.isNull() && !FileController::exists(filePath)) {
+        LOG_DEBUG("[Widget] 文件打开失败:" << filePath);
+        return;
+    }
+    m_tabBar->openFileTab(filePath, content);
 
-        // 自定义头文件符号高亮：扫描 #include/import 引入的本地文件，提取符号名
-        // 在标签页打开后立即扫描，结果传给当前编辑器的高亮器
-        // 使用 QTimer::singleShot(0) 确保 editor 已完成 enableSyntaxHighlighting 后再设置
-        QTimer::singleShot(0, this, [this, filePath, content]() {
-            if (!m_tabBar) return;
-            MyTextEdit* ed = static_cast<MyTextEdit*>(m_tabBar->currentEditor());
-            if (!ed) return;
-            // 仅当当前标签页对应刚打开的文件时才应用（防止快速切换标签页错位）
-            if (m_tabBar->currentFilePath() != filePath) return;
+    // 自定义头文件符号高亮：扫描 #include/import 引入的本地文件，提取符号名
+    // 在标签页打开后立即扫描，结果传给当前编辑器的高亮器
+    // 使用 QTimer::singleShot(0) 确保 editor 已完成 enableSyntaxHighlighting 后再设置
+    QTimer::singleShot(0, this, [this, filePath, content]() {
+        if (!m_tabBar) return;
+        MyTextEdit* ed = static_cast<MyTextEdit*>(m_tabBar->currentEditor());
+        if (!ed) return;
+        // 仅当当前标签页对应刚打开的文件时才应用（防止快速切换标签页错位）
+        if (m_tabBar->currentFilePath() != filePath) return;
 
-            QList<QPair<QString, QString>> externalSymbols =
-                HeaderSymbolScanner::scanForExternalSymbols(filePath, content);
-            if (!externalSymbols.isEmpty()) {
-                ed->setExternalSymbols(externalSymbols);
-                LOG_DEBUG("[Widget] 外部符号高亮: " << externalSymbols.size()
-                          << " 个符号, file=" << filePath.toStdString());
-            }
-            // 空结果时不调用 setExternalSymbols（避免无意义的 rehighlight）
-        });
-
-        // LSP：文件打开时通知语言服务器（按 autoStart 配置决定是否启动）
-        if (m_lspManager && ConfigManager::instance().lspAutoStart()) {
-            m_lspManager->openFile(filePath, content);
-            // L14: 延迟请求 documentSymbol — 服务器需要时间完成 initialize + didOpen 处理
-            // 500ms 后请求语义符号，触发语义高亮
-            QTimer::singleShot(500, this, [this, filePath]() {
-                if (m_lspManager && m_lspManager->hasServerForFile(filePath)) {
-                    m_lspManager->requestSymbols(filePath);
-                }
-            });
+        QList<QPair<QString, QString>> externalSymbols =
+            HeaderSymbolScanner::scanForExternalSymbols(filePath, content);
+        if (!externalSymbols.isEmpty()) {
+            ed->setExternalSymbols(externalSymbols);
+            LOG_DEBUG("[Widget] 外部符号高亮: " << externalSymbols.size()
+                      << " 个符号, file=" << filePath.toStdString());
         }
-    } else {
-        LOG_DEBUG("[Widget] 文件打开失败:" << filePath << file.errorString());
+        // 空结果时不调用 setExternalSymbols（避免无意义的 rehighlight）
+    });
+
+    // LSP：文件打开时通知语言服务器（按 autoStart 配置决定是否启动）
+    if (m_lspManager && ConfigManager::instance().lspAutoStart()) {
+        m_lspManager->openFile(filePath, content);
+        // L14: 延迟请求 documentSymbol — 服务器需要时间完成 initialize + didOpen 处理
+        // 500ms 后请求语义符号，触发语义高亮
+        QTimer::singleShot(500, this, [this, filePath]() {
+            if (m_lspManager && m_lspManager->hasServerForFile(filePath)) {
+                m_lspManager->requestSymbols(filePath);
+            }
+        });
     }
 }
 
@@ -1389,9 +1372,7 @@ void Widget::onSidebarCreateFile()
     );
     if (filename.isEmpty()) return;
 
-    QFile file(filename);
-    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        file.close();
+    if (FileController::createFile(filename)) {
         if (m_sideBar) m_sideBar->refreshFileList();
         // 自动打开新建的文件
         onFileOpenFromSidebar(filename);
@@ -1401,9 +1382,9 @@ void Widget::onSidebarCreateFile()
 void Widget::onSidebarDeleteFile(const QString& filePath)
 {
     int result = ModernDialog::question(this, tr("确认删除"),
-        tr("确定要删除 \"%1\" 吗？").arg(QFileInfo(filePath).fileName()));
+        tr("确定要删除 \"%1\" 吗？").arg(FileController::fileName(filePath)));
     if (result == ModernDialog::ROLE_ACCEPT) {
-        if (QFile::remove(filePath)) {
+        if (FileController::deleteFile(filePath)) {
             if (m_sideBar) m_sideBar->refreshFileList();
         }
     }
@@ -1411,21 +1392,22 @@ void Widget::onSidebarDeleteFile(const QString& filePath)
 
 void Widget::onSidebarRenameFile(const QString& filePath)
 {
-    QFileInfo fi(filePath);
+    QString currentName = FileController::fileName(filePath);
     bool ok = false;
     QString newName = ModernDialog::getText(
-        this, tr("重命名"), tr("新文件名："), fi.fileName(), &ok);
-    if (newName.isEmpty() || newName == fi.fileName()) return;
+        this, tr("重命名"), tr("新文件名："), currentName, &ok);
+    if (newName.isEmpty() || newName == currentName) return;
 
-    QString newPath = fi.absolutePath() + QStringLiteral("/") + newName;
-    if (QFile::rename(filePath, newPath)) {
+    QString newPath = FileController::absolutePath(filePath) +
+                      QStringLiteral("/") + newName;
+    if (FileController::renameFile(filePath, newPath)) {
         if (m_sideBar) m_sideBar->refreshFileList();
     }
 }
 
 void Widget::onSidebarOpenInFolder(const QString& filePath)
 {
-    QString dir = QFileInfo(filePath).absolutePath();
+    QString dir = FileController::absolutePath(filePath);
     QProcess::startDetached(QStringLiteral("explorer"), {dir});
 }
 
@@ -1463,31 +1445,24 @@ void Widget::onSidebarCreateFolder()
 void Widget::onSidebarMoveFile(const QString& sourcePath, const QString& targetDir)
 {
     // V1.9: 拖拽移动文件到目标文件夹
-    QFileInfo srcInfo(sourcePath);
-    QString targetPath = targetDir + QStringLiteral("/") + srcInfo.fileName();
+    QString sourceName = FileController::fileName(sourcePath);
+    QString targetPath = targetDir + QStringLiteral("/") + sourceName;
 
     // 同路径无需移动
-    if (QFileInfo(sourcePath).absoluteFilePath() ==
-        QFileInfo(targetPath).absoluteFilePath()) {
+    if (FileController::absoluteFilePath(sourcePath) ==
+        FileController::absoluteFilePath(targetPath)) {
         return;
     }
 
     // 目标已存在则提示
-    if (QFileInfo::exists(targetPath)) {
+    if (FileController::exists(targetPath)) {
         int ret = ModernDialog::question(this, tr("确认覆盖"),
-            tr("目标已存在 \"%1\"，是否覆盖？").arg(srcInfo.fileName()));
+            tr("目标已存在 \"%1\"，是否覆盖？").arg(sourceName));
         if (ret != ModernDialog::ROLE_ACCEPT) return;
-        QFile::remove(targetPath);
     }
 
-    // 执行移动（rename 在跨盘符或目标已存在时可能失败，使用 copy+remove 兜底）
-    bool ok = QFile::rename(sourcePath, targetPath);
-    if (!ok) {
-        if (QFile::copy(sourcePath, targetPath)) {
-            QFile::remove(sourcePath);
-            ok = true;
-        }
-    }
+    // 通过 FileController 统一移动（内部自动处理覆盖与跨盘符 fallback）
+    bool ok = FileController::moveFile(sourcePath, targetPath, true);
 
     if (ok) {
         // 若该文件已打开在编辑器中，更新其路径
@@ -1500,7 +1475,7 @@ void Widget::onSidebarMoveFile(const QString& sourcePath, const QString& targetD
         if (m_sideBar) m_sideBar->refreshFileList();
     } else {
         ModernDialog::warning(this, tr("移动失败"),
-            tr("无法移动文件 \"%1\" 到 \"%2\"").arg(srcInfo.fileName(), targetDir));
+            tr("无法移动文件 \"%1\" 到 \"%2\"").arg(sourceName, targetDir));
     }
 }
 
@@ -1512,7 +1487,7 @@ void Widget::onOutlineSymbolClicked(const QString& filePath, int line, int col)
     // 若目标文件与当前文件不同，先打开目标文件
     QString currentPath = m_tabBar->currentFilePath();
     if (currentPath != filePath) {
-        if (QFile::exists(filePath)) {
+        if (FileController::exists(filePath)) {
             onFileOpenFromSidebar(filePath);
         } else {
             LOG_DEBUG("[Widget] 大纲跳转：目标文件不存在 " << filePath);
@@ -1877,12 +1852,8 @@ void Widget::dropEvent(QDropEvent* event)
         QFileInfo fi(filePath);
         if (!fi.isFile()) continue;
 
-        QFile file(filePath);
-        if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            QString content = QTextStream(&file).readAll();
-            file.close();
-            m_tabBar->openFileTab(filePath, content);
-        }
+        QString content = FileController::readFile(filePath);
+        m_tabBar->openFileTab(filePath, content);
     }
 }
 
@@ -2255,7 +2226,7 @@ void Widget::onOpenInFolder()
             tr("当前文件尚未保存，无目录可打开。"));
         return;
     }
-    QString dir = QFileInfo(path).absolutePath();
+    QString dir = FileController::absolutePath(path);
     QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
 }
 
@@ -2354,7 +2325,7 @@ void Widget::onLspDefinitionReady(const QString& filePath, const QString& uri, i
     QString currentPath = m_tabBar ? m_tabBar->currentFilePath() : QString();
     if (currentPath != targetPath) {
         // 通过侧边栏打开文件路径（复用现有文件打开逻辑）
-        if (QFile::exists(targetPath)) {
+        if (FileController::exists(targetPath)) {
             onFileOpenFromSidebar(targetPath);
         } else {
             LOG_DEBUG("[Widget] 跳转目标文件不存在: " << targetPath);
@@ -2436,7 +2407,7 @@ void Widget::onLspReferencesReady(const QString& filePath, const QList<QVariantM
 
         // URI → 文件路径
         QString refPath = QUrl(refUri).toLocalFile();
-        QString fileName = QFileInfo(refPath).fileName();
+        QString fileName = FileController::fileName(refPath);
 
         // 显示格式: 文件名:行号:列号  —  完整路径
         QString display = QStringLiteral("%1:%2:%3  —  %4")
@@ -2461,7 +2432,7 @@ void Widget::onLspReferencesReady(const QString& filePath, const QList<QVariantM
         int line = item->data(Qt::UserRole + 1).toInt();
         int col = item->data(Qt::UserRole + 2).toInt();
 
-        if (QFile::exists(path)) {
+        if (FileController::exists(path)) {
             onFileOpenFromSidebar(path);
             // 跳转到目标位置
             if (m_currentTextEdit) {
@@ -2567,26 +2538,20 @@ void Widget::onLspFindReferences()
 
 void Widget::openDiffView(const QString& path1, const QString& path2)
 {
-    // 读取两个文件内容
-    QFile file1(path1);
-    QFile file2(path2);
-    QString text1, text2;
+    // 通过 FileController 统一读取两个文件内容
+    QString text1 = FileController::readFile(path1);
+    if (text1.isNull())
+        text1 = tr("（无法读取: %1）").arg(path1);
 
-    if (file1.open(QIODevice::ReadOnly | QIODevice::Text))
-        text1 = QString::fromUtf8(file1.readAll());
-    else
-        text1 = tr("（无法读取: %1）").arg(file1.errorString());
-
-    if (file2.open(QIODevice::ReadOnly | QIODevice::Text))
-        text2 = QString::fromUtf8(file2.readAll());
-    else
-        text2 = tr("（无法读取: %1）").arg(file2.errorString());
+    QString text2 = FileController::readFile(path2);
+    if (text2.isNull())
+        text2 = tr("（无法读取: %1）").arg(path2);
 
     // 创建 DiffViewer 并在标签页中打开
     auto* diffViewer = new DiffViewer();
     diffViewer->setDiffContent(text1, text2,
-                               QFileInfo(path1).fileName(),
-                               QFileInfo(path2).fileName());
+                               FileController::fileName(path1),
+                               FileController::fileName(path2));
 
     // 连接关闭信号
     connect(diffViewer, &DiffViewer::diffClosed, this, [this]() {
@@ -2598,7 +2563,7 @@ void Widget::openDiffView(const QString& path1, const QString& path2)
     // 在标签栏中打开
     m_tabBar->addCustomTab(diffViewer,
                            tr("对比: %1 ↔ %2")
-                               .arg(QFileInfo(path1).fileName())
-                               .arg(QFileInfo(path2).fileName()),
+                               .arg(FileController::fileName(path1))
+                               .arg(FileController::fileName(path2)),
                            true);
 }
