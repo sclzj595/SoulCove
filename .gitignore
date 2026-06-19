@@ -1,0 +1,32 @@
+# Build output
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.obj
+*.exe
+
+# Qt generated
+*.qm
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+*_autogen/
+
+# IDE
+.vscode/
+.idea/
+*.user
+
+# Third-party source archives
+third_party/*.tar.gz
+third_party/libssh2-build/
+
+# Compiled libraries
+*.a
+*.dll
+*.lib
+
+# Logs
+*.log

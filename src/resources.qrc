@@ -1,0 +1,15 @@
+<RCC>
+	<qresource prefix="/">
+		<file alias="open_blue">icon/open_blue.png</file>
+		<file alias="open">icon/open.png</file>
+		<file alias="save_blue">icon/save_blue.png</file>
+		<file alias="save">icon/save.png</file>
+		<file alias="close_blue">icon/close_blue.png</file>
+		<file alias="close">icon/close.png</file>
+		<file alias="note">icon/note.png</file>
+		<file alias="note_blue">icon/note_blue.png</file>
+		<file alias="app_icon">icon/vscode.png</file>
+		<file alias="sys_param">config/sys_param.ini</file>
+		<file alias="modern.qss">styles/modern.qss</file>
+	</qresource>
+</RCC>

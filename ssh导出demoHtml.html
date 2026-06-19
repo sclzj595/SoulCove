@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Markdown Document</title>
+  <meta name="author" content="">
+  <meta name="generator" content="scNotebook Markdown Exporter">
+  <meta name="date" content="2026-06-18 14:48:10">
+
+  <style>
+    /* ===== Reset & Base ===== */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Microsoft YaHei', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px;
+      line-height: 1.7;
+      color: #2c3e50;
+      background-color: #ffffff;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 40px 30px;
+    }
+
+    /* ===== Typography ===== */
+    h1, h2, h3, h4, h5, h6 {
+      color: #2c3e50;
+      font-weight: 600;
+      line-height: 1.3;
+      margin-top: 1.8em;
+      margin-bottom: 0.6em;
+      page-break-after: avoid;
+    }
+    h1 { font-size: 22px; border-bottom: 2px solid #9B59B6; padding-bottom: 8px; color: #8e44ad; }
+    h2 { font-size: 19px; border-bottom: 1px solid #e0d0e8; padding-bottom: 6px; color: #9B59B6; margin-top: 1.5em; }
+    h3 { font-size: 17px; color: #7d3c98; margin-top: 1.3em; }
+    h4 { font-size: 15px; color: #666; margin-top: 1.2em; }
+    h5, h6 { font-size: 14px; color: #888; font-weight: 600; }
+
+    p { margin: 0.8em 0; text-align: justify; }
+
+    /* ===== Links ===== */
+    a { color: #9B59B6; text-decoration: none; border-bottom: 1px dotted #9B59B6; }
+    a:hover { color: #8e44ad; border-bottom-style: solid; }
+
+    /* ===== Code ===== */
+    code {
+      background-color: #f0eef0;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 13px;
+      color: #c7254e;
+    }
+
+    pre {
+      background-color: #2d2d2d;
+      color: #cccccc;
+      padding: 16px 18px;
+      border-radius: 6px;
+      overflow-x: auto;
+      margin: 1em 0;
+      border: 1px solid #444;
+      page-break-inside: avoid;
+    }
+    pre code {
+      background: none;
+      padding: 0;
+      border-radius: 0;
+      color: #cccccc;
+      font-size: 12.5px;
+      line-height: 1.6;
+    }
+
+    /* ===== Blockquote ===== */
+    blockquote {
+      border-left: 4px solid #9B59B6;
+      padding: 12px 20px;
+      margin: 1.2em 0;
+      color: #666;
+      background: linear-gradient(135deg, rgba(155,89,182,0.06) 0%, transparent 100%);
+      border-radius: 0 8px 8px 0;
+    }
+
+    /* ===== Tables ===== */
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 1.2em 0;
+      page-break-inside: avoid;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 10px 14px;
+      text-align: left;
+    }
+    th {
+      background-color: #f8f9fa;
+      font-weight: 600;
+      color: #9B59B6;
+    }
+    tr:nth-child(even) { background-color: #fafafa; }
+
+    /* ===== Lists ===== */
+    ul, ol { padding-left: 28px; margin: 0.8em 0; }
+    li { margin: 5px 0; line-height: 1.6; }
+
+    /* ===== Horizontal Rule ===== */
+    hr {
+      border: none;
+      height: 1px;
+      background: linear-gradient(to right, transparent, #ccc, transparent);
+      margin: 2em 0;
+    }
+
+    /* ===== Images ===== */
+    img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      margin: 1em 0;
+    }
+
+    /* ===== Strong & Emphasis ===== */
+    strong { color: #2c3e50; font-weight: 600; }
+    em { color: #9B59B6; font-style: italic; }
+    del { color: #999; text-decoration: line-through; opacity: 0.65; }
+
+    /* ===== Task List (GFM) ===== */
+    input[type='checkbox'] {
+      width: 14px; height: 14px;
+      margin-right: 8px;
+      accent-color: #9B59B6;
+    }
+
+    /* ===== Print Styles (PDF优化）===== */
+    @media print {
+      body { max-width: 100%; padding: 20px; }
+      pre, blockquote, table, img { page-break-inside: avoid; }
+      h1, h2, h3 { page-break-after: avoid; }
+      a { color: #000; text-decoration: underline; }
+      a[href]::after { content: " (" attr(href) ")"; font-size: 80%; color: #666; }
+    }
+
+    /* ===== Footer ===== */
+    .footer {
+      margin-top: 4em;
+      padding-top: 1.5em;
+      border-top: 1px solid #eee;
+      text-align: center;
+      font-size: 12px;
+      color: #999;
+    }
+  </style>
+</head>
+
+<body>
+  <nav id='toc' style='background:#f8f9fa;padding:16px;border-radius:8px;margin-bottom:2em;border-left:4px solid #9B59B6;'>
+    <h3 style='margin:0 0 10px 0;color:#9B59B6;font-size:16px;'>📑 目录</h3>
+    <ul style='list-style:none;padding-left:0;margin:0;'>
+      <li style='margin:4px 0;color:#555;'>  • scNotebook SSH 远程隧道集成 — 完整开发方案</li>
+      <li style='margin:4px 0;color:#555;'>    • 一、功能总览 </li>
+      <li style='margin:4px 0;color:#555;'>    • 二、技术选型</li>
+      <li style='margin:4px 0;color:#555;'>      • 2.1 SSH 库</li>
+      <li style='margin:4px 0;color:#555;'>      • 2.2 依赖获取方式</li>
+      <li style='margin:4px 0;color:#555;'>      • 2.3 目录规划</li>
+      <li style='margin:4px 0;color:#555;'>    • 三、架构设计</li>
+      <li style='margin:4px 0;color:#555;'>      • 3.1 整体架构图</li>
+      <li style='margin:4px 0;color:#555;'>      • 3.2 数据流</li>
+      <li style='margin:4px 0;color:#555;'>    • 四、完整待做清单（按执行顺序）</li>
+      <li style='margin:4px 0;color:#555;'>      • Phase 1：基础设施（~3个任务）</li>
+      <li style='margin:4px 0;color:#555;'>        • 任务 1.1：引入 libssh2 依赖</li>
+      <li style='margin:4px 0;color:#555;'>        • 任务 1.2：SshSession 封装（核心）</li>
+      <li style='margin:4px 0;color:#555;'>        • 任务 1.3：ConnectionManager 单例</li>
+      <li style='margin:4px 0;color:#555;'>      • Phase 2：远程终端（~2个任务）</li>
+      <li style='margin:4px 0;color:#555;'>        • 任务 2.1：SshChannel 封装（PTY 终端）</li>
+      <li style='margin:4px 0;color:#555;'>        • 任务 2.2：集成到 EmbeddedTerminal（复用 TerminalView）</li>
+      <li style='margin:4px 0;color:#555;'>      • Phase 3：SFTP 文件操作（~3个任务）</li>
+      <li style='margin:4px 0;color:#555;'>        • 任务 3.1：SftpClient 封装</li>
+      <li style='margin:4px 0;color:#555;'>        • 任务 3.2：远程文件树 UI</li>
+      <li style='margin:4px 0;color:#555;'>        • 任务 3.3：远程文件编辑集成</li>
+      <li style='margin:4px 0;color:#555;'>      • Phase 4：连接管理与体验优化（~3个任务）</li>
+      <li style='margin:4px 0;color:#555;'>        • 任务 4.1：连接管理对话框</li>
+      <li style='margin:4px 0;color:#555;'>        • 任务 4.2：设置页集成</li>
+      <li style='margin:4px 0;color:#555;'>        • 任务 4.3：断线重连 + 健壮性</li>
+      <li style='margin:4px 0;color:#555;'>      • Phase 5：高级功能（可选，MVP 之后）</li>
+      <li style='margin:4px 0;color:#555;'>    • 五、任务依赖关系</li>
+      <li style='margin:4px 0;color:#555;'>    • 六、工作量估算汇总</li>
+      <li style='margin:4px 0;color:#555;'>    • 七、验收标准（MVP 版本）</li>
+      <li style='margin:4px 0;color:#555;'>    • 八、风险与缓解</li>
+    </ul>
+  </nav>
+
+<html><head><meta charset="utf-8"><style>body { font-family: 'Microsoft YaHei','Segoe UI',sans-serif; font-size: 14px; line-height: 1.7; color: #d4d4d4; background-color: transparent; margin: 0; }h1,h2,h3,h4,h5,h6 { color: #9b59b6; font-weight: 600; line-height: 1.3; margin-top: 20px; margin-bottom: 8px; }h1 { font-size: 24px; border-bottom: 2px solid #3c3c3c; padding-bottom: 6px; }h2 { font-size: 20px; border-bottom: 1px solid #3c3c3c; padding-bottom: 4px; }h3 { font-size: 17px; }h4 { font-size: 15px; }h5,h6 { font-size: 14px; color: #999999; }p { margin: 8px 0; }a { color: #9b59b6; text-decoration: none; }strong { font-weight: 700; }em { font-style: italic; }code { background-color: #282c34; color: #e06c75; padding: 2px 5px; border-radius: 3px; font-family: 'Consolas','Courier New',monospace; font-size: 13px; }pre { background-color: #282c34; padding: 12px; border: 1px solid #3c3c3c; border-radius: 6px; margin: 10px 0; }pre code { background-color: transparent; color: #d4d4d4; padding: 0; border: none; display: block; white-space: pre; font-size: 13px; line-height: 1.5; }blockquote { border-left: 4px solid #9b59b6; padding: 6px 14px; margin: 10px 0; color: #999999; background-color: rgba(255,255,255,0.04); }table { border-collapse: collapse; margin: 10px 0; }th,td { border: 1px solid #3c3c3c; padding: 6px 12px; }th { background-color: rgba(255,255,255,0.06); color: #9b59b6; font-weight: 600; }hr { border: none; border-top: 1px solid #3c3c3c; margin: 18px 0; }ul,ol { padding-left: 24px; margin: 6px 0; }li { margin: 3px 0; }img { max-width: 100%; }.hl-kw { color: #569CD6; font-weight: 600; }.hl-str { color: #CE9178; }.hl-num { color: #B5CEA8; }.hl-cmt { color: #6A9955; font-style: italic; }.hl-pp { color: #C586C0; }.hl-type { color: #4EC9B0; }.hl-fn { color: #DCDCAA; }</style></head><body><h1 id="scnotebookssh远程隧道集成—完整开发方案">scNotebook SSH 远程隧道集成 — 完整开发方案</h1><blockquote><p>创建日期：2026-06-16 | 基于 V1.6 架构扩展  </p><p>---  </p><h2 id="一、功能总览">一、功能总览 </h2></blockquote><p>将 scNotebook 从<strong>本地编辑器</strong>升级为 <strong>本地+远程双模式编辑器</strong>： - 通过 SSH 连接虚拟机/远程服务器 - 远程终端（SSH PTY）— 复用现有 TerminalView - SFTP 文件浏览/编辑/保存 - 连接管理 + 断线重连 </p><hr/><h2 id="二、技术选型">二、技术选型</h2><h3 id="21ssh库">2.1 SSH 库</h3><table><thead><tr><th style="text-align:left">方案</th><th style="text-align:left">优点</th><th style="text-align:left">缺点</th><th style="text-align:left">推荐度</th></tr></thead><tbody><tr><td style="text-align:left"><strong>libssh2</strong> (C库)</td><td style="text-align:left">成熟稳定、文档全、Windows支持好</td><td style="text-align:left">需手动封装Qt接口</td><td style="text-align:left">⭐⭐⭐⭐⭐</td></tr><tr><td style="text-align:left">QSSH (Qt封装)</td><td style="text-align:left">Qt原生API</td><td style="text-align:left">维护不活跃、bug多</td><td style="text-align:left">⭐⭐⭐</td></tr><tr><td style="text-align:left">libssh (C库)</td><td style="text-align:left">功能全面</td><td style="text-align:left">API复杂、Windows编译麻烦</td><td style="text-align:left">⭐⭐⭐</td></tr><tr><td style="text-align:left">自建socket实现</td><td style="text-align:left">零依赖</td><td style="text-align:left">工作量巨大、安全风险高</td><td style="text-align:left">⭐</td></tr></tbody></table><p><strong>最终选择：libssh2 + 自行封装 Qt 接口层</strong> </p><p>理由： - Windows 下 MinGW/GCC 编译友好（有预编译包） - 异步非阻塞 API，适合 GUI 应用 - 支持 SSH2 全部特性：密钥认证、端口转发、SFTP </p><h3 id="22依赖获取方式">2.2 依赖获取方式</h3><pre><code class="language-cmake">
+# 方案A：vcpkg（推荐）
+vcpkg install libssh2:x64-windows
+
+# 方案B：直接下载预编译
+<span class="hl-pp"># https</span>:<span class="hl-cmt">//www.libssh.org/download.html → libssh2-1.11.0</span>
+# 需要：libssh2.dll + libssh2.lib + 头文件
+</code></pre><h3 id="23目录规划">2.3 目录规划</h3><pre><code>
+scNotebookFinal/
+├── src/
+│   ├── ui/
+│   │   ├── CommandPalette.h/cpp          # 已有
+│   │   ├── TerminalView.h/cpp            # 已有（复用于远程终端）
+│   │   ├── TerminalBackend.h/cpp         # 已有（新增SSH后端）
+│   │   ├── EmbeddedTerminal.h/cpp        # 已有
+│   │   ├── RemoteConnectionDialog.h/cpp  # [新建] 连接/编辑对话框
+│   │   ├── RemoteFileTree.h/cpp          # [新建] SFTP远程文件树
+│   │   └── SftpFileOperator.h/cpp        # [新建] SFTP文件操作接口
+│   │
+│   ├── core/
+│   │   ├── ThemeManager.h/cpp            # 已有
+│   │   ├── ConfigManager.h/cpp           # 已有
+│   │   ├── ConnectionManager.h/cpp        # [新建] SSH连接管理(单例)
+│   │   ├── SshSession.h/cpp              # [新建] libssh2会话封装
+│   │   ├── SshChannel.h/cpp              # [新建] SSH通道封装(终端)
+│   │   └── SftpClient.h/cpp              # [新建] SFTP客户端封装
+│   │
+│   └── interfaces/
+│       ├── IFileOperator.h               # 已有（扩展远程协议支持）
+│       ├── ITerminalBackend.h            # [新建] 终端后端抽象接口
+│       └── IRemoteConnection.h           # [新建] 远程连接抽象接口
+│
+├── thirdparty/
+│   └── libssh2/                          <span class="hl-pp"># SSH</span>库文件
+│       ├── include/                      # 头文件
+│       ├── lib/                          # .lib静态库
+│       └── bin/                          # .dll动态库
+│
+├── config/
+│   └── ssh_connections.json              # [新建] 保存的连接配置
+│
+└── CMakeLists.txt                        # 添加libssh2链接
+</code></pre><hr/><h2 id="三、架构设计">三、架构设计</h2><h3 id="31整体架构图">3.1 整体架构图</h3><pre><code>
+┌─────────────────────────────────────────────────────┐
+│                    UI 层                            │
+│                                                     │
+│  ┌──────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │侧边栏     │  │  编辑区       │  │  终端面板     │  │
+│  │          │  │              │  │              │  │
+│  │本地文件树 │  │ 本地/远程     │  │ 本地/远程     │  │
+│  │+远程文件树│  │ 标签页编辑    │  │ PTY终端      │  │
+│  └────┬─────┘  └──────┬───────┘  └──────┬───────┘  │
+│       │               │                  │          │
+├───────┼───────────────┼──────────────────┼──────────┤
+│       ▼               ▼                  ▼          │
+│  ┌──────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │IFileOp   │  │ IFileOp      │  │ ITerminalBk  │  │
+│  │ (本地)   │  │ (SFTP)       │  │ (SSH)        │  │
+│  └────┬─────┘  └──────┬───────┘  └──────┬───────┘  │
+│       │               │                  │          │
+├───────┼───────────────┼──────────────────┼──────────┤
+│       ▼               ▼                  ▼          │
+│  ┌─────────────────────────────────────────────┐   │
+│  │              Core 层                         │   │
+│  │                                             │   │
+│  │  ┌─────────────┐  ┌────────────────────┐   │   │
+│  │  │ConnectionMgr │  │  SshSession        │   │   │
+│  │  │ (单例)       │→ │  (libssh2封装)     │   │   │
+│  │  │ 管理所有连接  │  │  认证/通道/SFTP    │   │   │
+│  │  └─────────────┘  └────────────────────┘   │   │
+│  │                                             │   │
+│  │  ┌─────────────┐  ┌────────────────────┐   │   │
+│  │  │ SshChannel   │  │  SftpClient        │   │   │
+│  │  │ (PTY终端)    │  │ (文件传输)         │   │   │
+│  │  └─────────────┘  └────────────────────┘   │   │
+│  └─────────────────────────────────────────────┘   │
+│                                                     │
+├─────────────────────────────────────────────────────┤
+│                  <span class="hl-fn">libssh2 (</span>C库)                       │
+└─────────────────────────────────────────────────────┘
+</code></pre><h3 id="32数据流">3.2 数据流</h3><pre><code>
+用户操作                    内部处理                     网络层
+───────                    ────────                    ──────
+
+打开远程文件:
+  双击远程文件树节点
+    → SftpFileOperator::<span class="hl-fn">openFile(</span>path)
+      → SftpClient::<span class="hl-fn">downloadToTemp(</span>remotePath)
+        → <span class="hl-fn">libssh2_sftp_read(</span>) ──────→ SSH SFTP 协议 ──→ 远程服务器
+        ← 返回临时本地文件路径 ←───────────────────────────
+      → MyTextEdit::<span class="hl-fn">openLocalFile(</span>tempPath)
+      → 记录 remotePath ↔ tempPath 映射
+
+保存远程文件:
+  Ctrl+S
+    → 检查当前标签是否为远程文件
+    → SftpFileOperator::<span class="hl-fn">saveFile(</span>tempPath, remotePath)
+      → SftpClient::<span class="hl-fn">uploadFromFile(</span>tempPath, remotePath)
+        → <span class="hl-fn">libssh2_sftp_write(</span>) ──────→ SSH SFTP 协议 ──→ 远程服务器
+
+远程终端输入:
+  在 TerminalView 中打字 + Enter
+    → SshChannel::<span class="hl-fn">write(</span>input)
+      → <span class="hl-fn">libssh2_channel_write(</span>) ────→ SSH 协议 ──→ 远程 PTY
+      ← <span class="hl-fn">libssh2_channel_read(</span>) ←─── SSH 协议 ←── 远程 stdout
+    → TerminalView::<span class="hl-fn">appendOutput(</span>data)  <span class="hl-cmt">// ANSI渲染显示</span>
+</code></pre><hr/><h2 id="四、完整待做清单（按执行顺序）">四、完整待做清单（按执行顺序）</h2><h3 id="phase1：基础设施（3个任务）">Phase 1：基础设施（~3个任务）</h3><h4 id="任务11：引入libssh2依赖">任务 1.1：引入 libssh2 依赖</h4><ul class="checklist"><li><label><input type="checkbox"/> 下载 libssh2 Windows 预编译包（或 vcpkg install）</label></li><li><label><input type="checkbox"/> 放入 <code>thirdparty/libssh2/</code> 目录</label></li><li><label><input type="checkbox"/> 修改 <code>CMakeLists.txt</code>：添加 include 路径 + link 库 + DLL 部署</label></li><li><label><input type="checkbox"/> 创建 <code>src/core/SshSession.h/cpp</code> 基础骨架</label></li><li><label><input type="checkbox"/> 编写最小测试：初始化 libssh2 + 清理，验证编译通过<strong>预估工作量</strong>：0.5天<strong>产出物</strong>：可编译的空壳 SSH 模块</label></li></ul><h4 id="任务12：sshsession封装（核心）">任务 1.2：SshSession 封装（核心）</h4><p>创建 <code>src/core/SshSession.h/cpp</code> </p><pre><code class="language-cpp">
+<span class="hl-kw">class</span> SshSession : <span class="hl-kw">public</span> QObject {
+    Q_OBJECT
+<span class="hl-kw">public</span>:
+    <span class="hl-cmt">// 连接管理</span>
+    <span class="hl-type">bool</span> <span class="hl-fn">connect(</span><span class="hl-kw">const</span> QString&amp; host, <span class="hl-type">int</span> port,
+                 <span class="hl-kw">const</span> QString&amp; user, <span class="hl-kw">const</span> QString&amp; password);
+    <span class="hl-type">bool</span> <span class="hl-fn">connectWithKey(</span><span class="hl-kw">const</span> QString&amp; host, <span class="hl-type">int</span> port,
+                        <span class="hl-kw">const</span> QString&amp; user,
+                        <span class="hl-kw">const</span> QString&amp; privateKeyPath,
+                        <span class="hl-kw">const</span> QString&amp; passphrase = <span class="hl-str">""</span>);
+    <span class="hl-type">void</span> <span class="hl-fn">disconnect(</span>);
+    <span class="hl-type">bool</span> <span class="hl-fn">isConnected(</span>) <span class="hl-kw">const</span>;
+
+    <span class="hl-cmt">// 会话信息</span>
+    QString <span class="hl-fn">host(</span>) <span class="hl-kw">const</span>;
+    <span class="hl-type">int</span> <span class="hl-fn">port(</span>) <span class="hl-kw">const</span>;
+    QString <span class="hl-fn">user(</span>) <span class="hl-kw">const</span>;
+    QString <span class="hl-fn">errorString(</span>) <span class="hl-kw">const</span>;
+
+    <span class="hl-cmt">// 创建子对象</span>
+    std::unique_ptr&lt;SshChannel&gt; <span class="hl-fn">openShell(</span><span class="hl-type">int</span> cols=<span class="hl-num">80</span>, <span class="hl-type">int</span> rows=<span class="hl-num">24</span>);
+    std::unique_ptr&lt;SshChannel&gt; <span class="hl-fn">execCommand(</span><span class="hl-kw">const</span> QString&amp; command);
+    std::unique_ptr&lt;SftpClient&gt; <span class="hl-fn">sftp(</span>);
+
+signals:
+    <span class="hl-type">void</span> <span class="hl-fn">connected(</span>);
+    <span class="hl-type">void</span> <span class="hl-fn">disconnected(</span>);
+    <span class="hl-type">void</span> <span class="hl-fn">errorOccurred(</span><span class="hl-kw">const</span> QString&amp; error);
+
+<span class="hl-kw">private</span>:
+    LIBSSH2_SESSION* m_session = <span class="hl-kw">nullptr</span>;
+    SOCKET m_socket = INVALID_SOCKET;
+    <span class="hl-cmt">// ... 内部状态</span>
+};
+</code></pre><p>具体实现要求： - [ ] TCP socket 连接（Winsock2 on Windows） - [ ] libssh2<em>session</em>handshake() 握手 - [ ] 密码认证：libssh2<em>userauth</em>password() - [ ] 密钥认证：libssh2<em>userauth</em>publickey_fromfile() - [ ] host key 验证（首次连接指纹确认） - [ ] 异步非阻塞模式（libssh2<em>set</em>blocking(session, 0)） - [ ] 心跳保活（keepalive 每30秒） - [ ] 断线检测与自动清理 - <strong>预估工作量</strong>：1天 - <strong>产出物</strong>：可建立/断开 SSH 连接 </p><h4 id="任务13：connectionmanager单例">任务 1.3：ConnectionManager 单例</h4><p>创建 <code>src/core/ConnectionManager.h/cpp</code> </p><pre><code class="language-cpp">
+<span class="hl-kw">class</span> ConnectionManager : <span class="hl-kw">public</span> QObject {
+    Q_OBJECT
+<span class="hl-kw">public</span>:
+    <span class="hl-kw">static</span> ConnectionManager&amp; <span class="hl-fn">instance(</span>);
+
+    <span class="hl-cmt">// 连接 CRUD</span>
+    QStringList <span class="hl-fn">connectionIds(</span>) <span class="hl-kw">const</span>;
+    SshSession* <span class="hl-fn">getSession(</span><span class="hl-kw">const</span> QString&amp; id);  <span class="hl-cmt">// 已连接则返回</span>
+    <span class="hl-type">bool</span> <span class="hl-fn">connectTo(</span><span class="hl-kw">const</span> QString&amp; id);          <span class="hl-cmt">// 触发连接</span>
+    <span class="hl-type">void</span> <span class="hl-fn">disconnectFrom(</span><span class="hl-kw">const</span> QString&amp; id);
+
+    <span class="hl-cmt">// 连接配置持久化</span>
+    <span class="hl-kw">struct</span> ConnectionConfig {
+        QString id;             <span class="hl-cmt">// 唯一ID</span>
+        QString name;           <span class="hl-cmt">// 显示名称 "VM-Ubuntu"</span>
+        QString host;           <span class="hl-cmt">// IP或域名</span>
+        <span class="hl-type">int</span> port = <span class="hl-num">22</span>;          <span class="hl-cmt">// 端口</span>
+        QString username;       <span class="hl-cmt">// 用户名</span>
+        AuthType authType;      <span class="hl-cmt">// Password / Key / Agent</span>
+        QString password;       <span class="hl-cmt">// 密码（加密存储）</span>
+        QString privateKeyPath; <span class="hl-cmt">// 密钥路径</span>
+        QString passphrase;     <span class="hl-cmt">// 密钥密码</span>
+    };
+    QList&lt;ConnectionConfig&gt; <span class="hl-fn">allConfigs(</span>) <span class="hl-kw">const</span>;
+    <span class="hl-type">void</span> <span class="hl-fn">saveConfig(</span><span class="hl-kw">const</span> ConnectionConfig&amp; cfg);
+    <span class="hl-type">void</span> <span class="hl-fn">removeConfig(</span><span class="hl-kw">const</span> QString&amp; id);
+    <span class="hl-type">void</span> <span class="hl-fn">loadAllConfigs(</span>);      <span class="hl-cmt">// 启动时从JSON加载</span>
+
+signals:
+    <span class="hl-type">void</span> <span class="hl-fn">sessionConnected(</span><span class="hl-kw">const</span> QString&amp; id);
+    <span class="hl-type">void</span> <span class="hl-fn">sessionDisconnected(</span><span class="hl-kw">const</span> QString&amp; id);
+    <span class="hl-type">void</span> <span class="hl-fn">sessionError(</span><span class="hl-kw">const</span> QString&amp; id, <span class="hl-kw">const</span> QString&amp; error);
+
+<span class="hl-kw">private</span>:
+    QMap&lt;QString, SshSession*&gt; m_sessions;     <span class="hl-cmt">// id → 活跃会话</span>
+    QMap&lt;QString, ConnectionConfig&gt; m_configs; <span class="hl-cmt">// id → 配置</span>
+    QString m_configFilePath;                  <span class="hl-cmt">// JSON存储路径</span>
+};
+</code></pre><p>具体实现要求： - [ ] JSON 格式持久化（复用现有 QJsonDocument 能力） - [ ] 密码 AES 加密存储（或使用系统凭据管理器） - [ ] 多连接并行管理 - [ ] 连接状态枚举：Disconnected / Connecting / Connected / Error - [ ] 信号驱动 UI 更新 - <strong>预估工作量</strong>：0.5天 - <strong>产出物</strong>：连接配置的增删改查 + 多会话管理 </p><hr/><h3 id="phase2：远程终端（2个任务）">Phase 2：远程终端（~2个任务）</h3><h4 id="任务21：sshchannel封装（pty终端）">任务 2.1：SshChannel 封装（PTY 终端）</h4><p>创建 <code>src/core/SshChannel.h/cpp</code> </p><pre><code class="language-cpp">
+<span class="hl-kw">class</span> SshChannel : <span class="hl-kw">public</span> QObject {
+    Q_OBJECT
+<span class="hl-kw">public</span>:
+    explicit <span class="hl-fn">SshChannel(</span>LIBSSH2_SESSION* session);
+    ~<span class="hl-fn">SshChannel(</span>);
+
+    <span class="hl-cmt">// 打开 shell / 执行命令</span>
+    <span class="hl-type">bool</span> <span class="hl-fn">openShell(</span><span class="hl-type">int</span> cols=<span class="hl-num">80</span>, <span class="hl-type">int</span> rows=<span class="hl-num">24</span>);
+    <span class="hl-type">bool</span> <span class="hl-fn">execCommand(</span><span class="hl-kw">const</span> QString&amp; cmd);
+
+    <span class="hl-cmt">// I/O</span>
+    qint64 <span class="hl-fn">write(</span><span class="hl-kw">const</span> QByteArray&amp; data);
+    <span class="hl-type">void</span> <span class="hl-fn">resizePty(</span><span class="hl-type">int</span> cols, <span class="hl-type">int</span> rows);
+    <span class="hl-type">void</span> <span class="hl-fn">sendSignal(</span><span class="hl-kw">const</span> QString&amp; signal);  <span class="hl-cmt">// SIGINT/SIGTERM等</span>
+    <span class="hl-type">void</span> <span class="hl-fn">close(</span>);
+
+    <span class="hl-type">bool</span> <span class="hl-fn">isOpen(</span>) <span class="hl-kw">const</span>;
+    QString <span class="hl-fn">errorString(</span>) <span class="hl-kw">const</span>;
+
+signals:
+    <span class="hl-type">void</span> <span class="hl-fn">readyReadStandardOutput(</span><span class="hl-kw">const</span> QByteArray&amp; data);
+    <span class="hl-type">void</span> <span class="hl-fn">readyReadStandardError(</span><span class="hl-kw">const</span> QByteArray&amp; data);
+    <span class="hl-type">void</span> <span class="hl-fn">channelClosed(</span>);
+    <span class="hl-type">void</span> <span class="hl-fn">channelError(</span><span class="hl-kw">const</span> QString&amp; error);
+
+<span class="hl-kw">private</span> slots:
+    <span class="hl-type">void</span> <span class="hl-fn">poll(</span>);  <span class="hl-cmt">// 定时轮询 libssh2 通道数据</span>
+
+<span class="hl-kw">private</span>:
+    LIBSSH2_CHANNEL* m_channel = <span class="hl-kw">nullptr</span>;
+    QTimer* m_pollTimer = <span class="hl-kw">nullptr</span>;  <span class="hl-cmt">// 10ms轮询</span>
+    <span class="hl-cmt">// ...</span>
+};
+</code></pre><p>具体实现要求： - [ ] libssh2<em>channel</em>open<em>session() + request</em>pty("xterm-256color") - [ ] libssh2<em>channel</em>shell() 或 libssh2<em>channel</em>exec() - [ ] QTimer 10ms 轮询：libssh2<em>channel</em>read() 非阻塞读取 - [ ] stdout/stderr 分离读取 - [ ] 窗口大小变化信号：SIGWINCH → libssh2<em>channel</em>request<em>pty</em>size() - [ ] Ctrl+C 发送：write("\x03") - [ ] EOF 检测：libssh2<em>channel</em>eof() - <strong>预估工作量</strong>：1天 - <strong>产出物</strong>：可用的 SSH PTY 通道 </p><h4 id="任务22：集成到embeddedterminal（复用terminalview）">任务 2.2：集成到 EmbeddedTerminal（复用 TerminalView）</h4><p>修改现有文件： </p><p><strong>EmbeddedTerminal.h/cpp 变更：</strong> - [ ] 新增 <code><span class="hl-fn">createRemoteSession(</span>)</code> 方法 - [ ] TerminalBackend 改为接口（ITerminalBackend），新增 SshTerminalBackend 实现 - [ ] 或者更简单：让 TerminalBackend 同时支持 QProcess 和 SshChannel（策略模式） </p><pre><code class="language-cpp">
+<span class="hl-cmt">// 方案：策略模式（推荐，改动最小）</span>
+<span class="hl-kw">class</span> TerminalBackend : <span class="hl-kw">public</span> QObject {
+    <span class="hl-kw">enum</span> <span class="hl-kw">class</span> BackendType { LocalProcess, SshChannel };
+    <span class="hl-cmt">// ... 现有代码保留</span>
+    <span class="hl-cmt">// 新增：</span>
+    <span class="hl-type">void</span> <span class="hl-fn">setSshChannel(</span>SshChannel* channel);  <span class="hl-cmt">// 注入SSH通道</span>
+    <span class="hl-cmt">// write()/start() 根据 m_backendType 分发到 QProcess 或 SshChannel</span>
+};
+</code></pre><p><strong>widget.cpp 变更：</strong> - [ ] 侧边栏新增"远程"按钮（在活动栏底部） - [ ] 点击后弹出连接列表 / 新建连接对话框 - [ ] 连接成功后自动打开远程终端标签 - [ ] 远程终端标签显示为 "hostname: user@192.168.x.x" - <strong>预估工作量</strong>：0.5天 - <strong>产出物</strong>：可在 UI 中打开并使用 SSH 远程终端 </p><hr/><h3 id="phase3：sftp文件操作（3个任务）">Phase 3：SFTP 文件操作（~3个任务）</h3><h4 id="任务31：sftpclient封装">任务 3.1：SftpClient 封装</h4><p>创建 <code>src/core/SftpClient.h/cpp</code> </p><pre><code class="language-cpp">
+<span class="hl-kw">class</span> SftpClient : <span class="hl-kw">public</span> QObject {
+    Q_OBJECT
+<span class="hl-kw">public</span>:
+    explicit <span class="hl-fn">SftpClient(</span>LIBSSH2_SESSION* session);
+    ~<span class="hl-fn">SftpClient(</span>);
+
+    <span class="hl-cmt">// 目录操作</span>
+    <span class="hl-kw">struct</span> FileInfo {
+        QString name;
+        <span class="hl-type">bool</span> isDirectory;
+        quint64 size;
+        QDateTime lastModified;
+        QString permissions;  <span class="hl-cmt">// rwxr-xr-x</span>
+    };
+    QList&lt;FileInfo&gt; <span class="hl-fn">listDir(</span><span class="hl-kw">const</span> QString&amp; path);
+    <span class="hl-type">bool</span> <span class="hl-fn">mkdir(</span><span class="hl-kw">const</span> QString&amp; path);
+    <span class="hl-type">bool</span> <span class="hl-fn">remove(</span><span class="hl-kw">const</span> QString&amp; path);  <span class="hl-cmt">// 文件或空目录</span>
+    <span class="hl-type">bool</span> <span class="hl-fn">rename(</span><span class="hl-kw">const</span> QString&amp; oldPath, <span class="hl-kw">const</span> QString&amp; newPath);
+
+    <span class="hl-cmt">// 文件传输</span>
+    <span class="hl-type">bool</span> <span class="hl-fn">download(</span><span class="hl-kw">const</span> QString&amp; remotePath, <span class="hl-kw">const</span> QString&amp; localPath,
+                  std::function&lt;<span class="hl-fn">void(</span>qint64 done, qint64 total)&gt; progress = <span class="hl-kw">nullptr</span>);
+    <span class="hl-type">bool</span> <span class="hl-fn">upload(</span><span class="hl-kw">const</span> QString&amp; localPath, <span class="hl-kw">const</span> QString&amp; remotePath,
+                std::function&lt;<span class="hl-fn">void(</span>qint64 done, qint64 total)&gt; progress = <span class="hl-kw">nullptr</span>);
+
+    <span class="hl-cmt">// 流式读写（大文件）</span>
+    QByteArray <span class="hl-fn">readFile(</span><span class="hl-kw">const</span> QString&amp; remotePath, qint64 maxSize = <span class="hl-num">10</span>*<span class="hl-num">1024</span>*<span class="hl-num">1024</span>);
+    <span class="hl-type">bool</span> <span class="hl-fn">writeFile(</span><span class="hl-kw">const</span> QString&amp; remotePath, <span class="hl-kw">const</span> QByteArray&amp; data);
+
+    <span class="hl-type">bool</span> <span class="hl-fn">isAvailable(</span>) <span class="hl-kw">const</span>;
+    QString <span class="hl-fn">errorString(</span>) <span class="hl-kw">const</span>;
+
+signals:
+    <span class="hl-type">void</span> <span class="hl-fn">transferProgress(</span>qint64 bytesDone, qint64 bytesTotal);
+    <span class="hl-type">void</span> <span class="hl-fn">transferComplete(</span><span class="hl-kw">const</span> QString&amp; path);
+    <span class="hl-type">void</span> <span class="hl-fn">transferError(</span><span class="hl-kw">const</span> QString&amp; path, <span class="hl-kw">const</span> QString&amp; error);
+
+<span class="hl-kw">private</span>:
+    LIBSSH2_SFTP* m_sftp = <span class="hl-kw">nullptr</span>;
+};
+</code></pre><p>具体实现要求： - [ ] libssh2<em>sftp</em>init() 初始化 - [ ] libssh2<em>sftp</em>opendir() + readdir() 目录遍历 - [ ] libssh2<em>sftp</em>open() + read/write 文件传输 - [ ] 进度回调（每4KB触发一次信号） - [ ] 大文件分块传输 - [ ] 错误处理：权限不足/空间不足/断连恢复 - <strong>预估工作量</strong>：1天 - <strong>产出物</strong>：完整的 SFTP 客户端能力 </p><h4 id="任务32：远程文件树ui">任务 3.2：远程文件树 UI</h4><p>创建 <code>src/ui/RemoteFileTree.h/cpp</code> </p><p>UI 设计： <code></code>` ┌──────────────────────────────┐ │ 🖥 远程: VM-Ubuntu          │  ← 连接名称 │ ├─ 📁 home                  │ │ │  └─ 📁 user               │ │ │     ├─ 📁 projects        │ │ │     │  └─ 📄 main.py      │  ← 双击打开 │ │     ├─ 📄 .bashrc         │ │ │     └─ 📄 .profile        │ │ ├─ 📁 etc                   │ │ └─ 📁 var                   │ │                              │ │ [🔄刷新] [📤上传] [⬇下载]    │  ← 工具栏按钮 └──────────────────────────────┘ <code></code>` </p><p>具体实现要求： - [ ] 继承 QTreeWidget（与本地 SideBar 文件树风格一致） - [ ] 异步加载目录（避免 UI 卡顿）：点击展开 → 后台 SFTP → 回调填充 - [ ] 图标区分：文件夹/文件/可执行/符号链接 - [ ] 右键菜单：打开/下载/上传/删除/重命名/新建 - [ ] 双击文件 → 触发 downloadToTemp → 打开编辑器标签 - [ ] 标签标题显示远程路径前缀 <code>[remote] /home/user/main.py</code> - [ ] 加载中显示 spinner 动画 - [ ] 断连时显示警告提示 - <strong>预估工作量</strong>：1天 - <strong>产出物</strong>：可视化的远程文件浏览器 </p><h4 id="任务33：远程文件编辑集成">任务 3.3：远程文件编辑集成</h4><p>修改现有文件： </p><p><strong>EditorTabBar 变更：</strong> - [ ] 标签数据结构增加字段：<code><span class="hl-type">bool</span> isRemote; QString remotePath; QString tempLocalPath;</code> - [ ] 远程标签图标加一个小云朵/链式图标标识 - [ ] 保存时检测 isRemote → 调用 SFTP upload </p><p><strong>MyTextEdit/FileOperator 变更：</strong> - [ ] 新增 SftpFileOperator 实现 IFileOperator 接口 - [ ] openFile(): SFTP download 到临时文件 → 打开 - [ ] saveFile(): 保存到临时文件 → SFTP upload 回远程 - [ ] 关闭标签时清理临时文件 </p><p><strong>widget.cpp 变更：</strong> - [ ] 侧边栏切换：本地/远程文件树（QStackedWidget 切换） - [ ] 远程文件保存进度条显示（状态栏或覆盖层） - [ ] 编辑远程文件时的状态栏显示："已连接 VM-Ubuntu | 远程文件" - <strong>预估工作量</strong>：1天 - <strong>产出物</strong>：完整的远程文件编辑工作流 </p><hr/><h3 id="phase4：连接管理与体验优化（3个任务）">Phase 4：连接管理与体验优化（~3个任务）</h3><h4 id="任务41：连接管理对话框">任务 4.1：连接管理对话框</h4><p>创建 <code>src/ui/RemoteConnectionDialog.h/cpp</code> </p><p>UI 设计： <code></code>` ┌─ SSH 连接管理 ──────────────────────┐ │                                      │ │ [+ 新建连接]                         │ │                                      │ │ ┌──────────────────────────────────┐ │ │ │ 🟢 VM-Ubuntu  user@192.168.56.101│ │ │ │    [连接] [编辑] [断开] [删除]    │ │ │ ├──────────────────────────────────┤ │ │ │ ⚪ CentOS    root@192.168.56.102 │ │ │ │    [连接] [编辑] [     ] [删除]   │ │ │ ├──────────────────────────────────┤ │ │ │ 🔴 AWS-EC2   ec2-user@52.xx.xx   │ │ │ │    [连接] [编辑] [断开] [删除]    │ │ │ └──────────────────────────────────┘ │ │                                      │ │ ☑ 启动时自动连接上次使用的            │ │                                      │ │              [取消]  [确定]           │ └──────────────────────────────────────┘ <code></code>` </p><p>新建/编辑连接子对话框： <code></code>` ┌─ 编辑连接 ──────────────────────────┐ │                                     │ │ 名称:     [VM-Ubuntu<strong></strong><strong></strong>_]      │ │ 主机:     [192.168.56.101<strong></strong><em></em>]    │ │ 端口:     [22<strong></strong><strong></strong><strong></strong><em></em>_]       │ │ 用户名:   [user<strong></strong><strong></strong><strong></strong>_]       │ │                                     │ │ 认证方式:  (●) 密码  ( ) 密钥  ( ) Agent │ │                                     │ │ 密码:     [••••••••<strong></strong><strong></strong>_]  👁   │  ← 显示/隐藏 │                                     │ │ 或 密钥路径: [Browse...<strong></strong><strong></strong><strong></strong>] │ │ 密钥密码:  [<strong></strong><strong></strong><strong></strong><strong></strong><em></em>_]    │ │                                     │ │ ☑ 保存密码                          │ │                                     │ │      [测试连接]    [取消]  [确定]   │ └─────────────────────────────────────┘ <code></code>` </p><p>具体实现要求： - [ ] QDialog 子类，暗色主题样式 - [ ] 表单验证（主机必填、端口范围 1-65535） - [ ] "测试连接" 按钮 → 尝试连接 → 显示成功/失败提示 - [ ] 密码输入框带显示/隐藏切换 - [ ] 密钥文件选择器（QFileDialog） - [ ] 连接状态指示灯（绿/黄/红） - <strong>预估工作量</strong>：1天 - <strong>产出物</strong>：完整的连接管理 UI </p><h4 id="任务42：设置页集成">任务 4.2：设置页集成</h4><p>修改 SettingsPage： </p><ul class="checklist"><li><label><input type="checkbox"/> 导航列表新增"远程"分类（第6个）</label></li><li><label><input type="checkbox"/> 默认连接选择</label></li><li><label><input type="checkbox"/> 终端默认尺寸（列数/行数）</label></li><li><label><input type="checkbox"/> SFTP 传输缓冲区大小</label></li><li><label><input type="checkbox"/> 断线重连间隔（秒）</label></li><li><label><input type="checkbox"/> 超时时间（秒）<strong>预估工作量</strong>：0.5天</label></li></ul><h4 id="任务43：断线重连健壮性">任务 4.3：断线重连 + 健壮性</h4><ul class="checklist"><li><label><input type="checkbox"/> SSH 断连检测（poll 返回错误 / socket 异常）</label></li><li><label><input type="checkbox"/> 自动重连机制（指数退避：1s → 2s → 4s → 8s → 最大30s）</label></li><li><label><input type="checkbox"/> 重连中 UI 状态提示（终端区显示"正在重连..."）</label></li><li><label><input type="checkbox"/> 重连成功后恢复 SFTP 文件树</label></li><li><label><input type="checkbox"/> 操作中断保护（上传/下载中途断连 → 暂停 → 重连后续传）</label></li><li><label><input type="checkbox"/> 网络异常友好提示（不可达/拒绝/超时/认证失败）<strong>预估工作量</strong>：1天</label></li></ul><hr/><h3 id="phase5：高级功能（可选，mvp之后）">Phase 5：高级功能（可选，MVP 之后）</h3><table><thead><tr><th style="text-align:left">#</th><th style="text-align:left">功能</th><th style="text-align:left">说明</th><th style="text-align:left">优先级</th></tr></thead><tbody><tr><td style="text-align:left">5.1</td><td style="text-align:left"><strong>端口转发</strong></td><td style="text-align:left">SSH -L/-R 端口映射，调试远程服务</td><td style="text-align:left">低</td></tr><tr><td style="text-align:left">5.2</td><td style="text-align:left"><strong>SCP 批量传输</strong></td><td style="text-align:left">整文件夹上传/下载</td><td style="text-align:left">低</td></tr><tr><td style="text-align:left">5.3</td><td style="text-align:left"><strong>跳板机/Jump Host</strong></td><td style="text-align:left">A → B → C 多跳连接</td><td style="text-align:left">低</td></tr><tr><td style="text-align:left">5.4</td><td style="text-align:left"><strong>SSH Config 解析</strong></td><td style="text-align:left">读取 ~/.ssh/config 自动填充</td><td style="text-align:left">中</td></tr><tr><td style="text-align:left">5.5</td><td style="text-align:left"><strong>文件同步</strong></td><td style="text-align:left">本地↔远程双向同步（类似 rsync）</td><td style="text-align:left">低</td></tr><tr><td style="text-align:left">5.6</td><td style="text-align:left"><strong>终端分屏</strong></td><td style="text-align:left">远程终端也支持水平分割</td><td style="text-align:left">低</td></tr></tbody></table><hr/><h2 id="五、任务依赖关系">五、任务依赖关系</h2><pre><code>
+Phase <span class="hl-num">1</span> (基础)
+  <span class="hl-num">1.1</span> 引入libssh2 ──────────────────────┐
+       ↓                                 │
+  <span class="hl-num">1.2</span> SshSession封装 ◄──────────────────┘
+       ↓
+  <span class="hl-num">1.3</span> ConnectionManager ◄─── 需要 <span class="hl-num">1.2</span>
+       ↓
+Phase <span class="hl-num">2</span> (远程终端)
+  <span class="hl-num">2.1</span> SshChannel封装 ◄──── 需要 <span class="hl-num">1.2</span>
+       ↓
+  <span class="hl-num">2.2</span> 集成到EmbeddedTerminal ◄─ 需要 <span class="hl-num">2.1</span> + <span class="hl-num">1.3</span>
+       ↓
+Phase <span class="hl-num">3</span> (SFTP文件)
+  <span class="hl-num">3.1</span> SftpClient封装 ◄───── 需要 <span class="hl-num">1.2</span>
+       ↓
+  <span class="hl-num">3.2</span> 远程文件树UI ◄─────── 需要 <span class="hl-num">3.1</span> + <span class="hl-num">1.3</span>
+       ↓
+  <span class="hl-num">3.3</span> 远程文件编辑集成 ◄─── 需要 <span class="hl-num">3.2</span> + <span class="hl-num">2.2</span>
+       ↓
+Phase <span class="hl-num">4</span> (体验)
+  <span class="hl-num">4.1</span> 连接管理对话框 ◄──── 需要 <span class="hl-num">1.3</span>
+  <span class="hl-num">4.2</span> 设置页集成 ◄──────── 需要 <span class="hl-num">1.3</span>
+  <span class="hl-num">4.3</span> 断线重连 ◄────────── 需要 <span class="hl-num">1.2</span> + <span class="hl-num">2.1</span> + <span class="hl-num">3.1</span>
+</code></pre><p><strong>关键路径（最短完成时间）</strong>： <code></code>` 1.1 → 1.2 → (2.1 → 2.2) || (3.1 → 3.2 → 3.3) → 4.1 <code></code>` <strong>MVP 最小可用版本</strong>：Phase 1 + Phase 2（约 3 天工作量） </p><hr/><h2 id="六、工作量估算汇总">六、工作量估算汇总</h2><table><thead><tr><th style="text-align:left">Phase</th><th style="text-align:left">任务数</th><th style="text-align:left">预估工时</th><th style="text-align:left">累计</th></tr></thead><tbody><tr><td style="text-align:left">Phase 1: 基础设施</td><td style="text-align:left">3</td><td style="text-align:left">2天</td><td style="text-align:left">2天</td></tr><tr><td style="text-align:left">Phase 2: 远程终端</td><td style="text-align:left">2</td><td style="text-align:left">1.5天</td><td style="text-align:left">3.5天</td></tr><tr><td style="text-align:left">Phase 3: SFTP 文件</td><td style="text-align:left">3</td><td style="text-align:left">3天</td><td style="text-align:left">6.5天</td></tr><tr><td style="text-align:left">Phase 4: 连接管理</td><td style="text-align:left">3</td><td style="text-align:left">2.5天</td><td style="text-align:left">9天</td></tr><tr><td style="text-align:left">Phase 5: 高级功能</td><td style="text-align:left">6</td><td style="text-align:left">可选</td><td style="text-align:left">—</td></tr><tr><td style="text-align:left"><strong>总计 (MVP)</strong></td><td style="text-align:left"><strong>8 个核心任务</strong></td><td style="text-align:left"><strong>~6.5天</strong></td><td style="text-align:left">—</td></tr></tbody></table><hr/><h2 id="七、验收标准（mvp版本）">七、验收标准（MVP 版本）</h2><ul class="checklist"><li><label><input type="checkbox"/> 可以添加/编辑/删除 SSH 连接配置</label></li><li><label><input type="checkbox"/> 可以通过密码或密钥认证连接到虚拟机</label></li><li><label><input type="checkbox"/> 连接后在底部面板打开远程终端，可以正常执行命令</label></li><li><label><input type="checkbox"/> 远程终端 ANSI 输出正确渲染（颜色/光标）</label></li><li><label><input type="checkbox"/> 左侧显示远程文件树，可以浏览目录</label></li><li><label><input type="checkbox"/> 双击远程文件可以在编辑器中打开并编辑</label></li><li><label><input type="checkbox"/> Ctrl+S 保存远程文件（上传回服务器）</label></li><li><label><input type="checkbox"/> 断线时有明确提示，重连后可恢复</label></li><li><label><input type="checkbox"/> 切换主题时远程相关 UI 样式跟随变化</label></li></ul><hr/><h2 id="八、风险与缓解">八、风险与缓解</h2><table><thead><tr><th style="text-align:left">风险</th><th style="text-align:left">概率</th><th style="text-align:left">影响</th><th style="text-align:left">缓解措施</th></tr></thead><tbody><tr><td style="text-align:left">libssh2 Windows 编译问题</td><td style="text-align:left">中</td><td style="text-align:left">高</td><td style="text-align:left">使用预编译包 / vcpkg</td></tr><tr><td style="text-align:left">SSH 连接被防火墙阻挡</td><td style="text-align:left">中</td><td style="text-align:left">中</td><td style="text-align:left">设置页添加代理选项</td></tr><tr><td style="text-align:left">大文件传输内存溢出</td><td style="text-align:left">低</td><td style="text-align:left">高</td><td style="text-align:left">分块流式传输（4KB块）</td></tr><tr><td style="text-align:left">PTY 终端兼容性差</td><td style="text-align:left">低</td><td style="text-align:left">中</td><td style="text-align:left">fallback 到 exec mode</td></tr><tr><td style="text-align:left">密码安全性</td><td style="text-align:left">中</td><td style="text-align:left">中</td><td style="text-align:left">Windows DPAPI 加密存储</td></tr></tbody></table></body></html>
+  <div class='footer'>
+    <p>Generated by scNotebook | 2026-06-18 14:48:10</p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,7 @@
+sc stephen
+
+在大多数常见的 Ubuntu 系统中，OpenSSH 服务器的服务单元名称就是 openssh-server.service，命令 sudo systemctl status openssh-server 理论上是正确的。
+
+不过，存在以下几种特殊情况可能导致认为名称不对：
+
+系统定制或特殊安装：如果是在定制化的 Ubuntu 环境，或者安装 OpenSSH 服务器时采用了非标准方式（比如从源码编译安装 ），服务单元名称可能会被修改。可以尝试查找一下 OpenSSH 相关服务的实际名称，在终端运行：
