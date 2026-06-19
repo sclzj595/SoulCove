@@ -1,9 +1,9 @@
 #include "UIFactory.h"
-#include "core/MaddyParser.h"
-#include "core/MarkdownParser.h"
-#include "core/DefaultUiLibrary.h"
-#include "interfaces/IUiLibrary.h"
-#include "interfaces/IMarkdownParser.h"
+#include "core/markdown/MaddyParser.h"
+#include "core/markdown/MarkdownParser.h"
+#include "core/config/DefaultUiLibrary.h"
+#include "interfaces/ui/IUiLibrary.h"
+#include "interfaces/markdown/IMarkdownParser.h"
 
 // 静态成员初始化
 std::unique_ptr<IUiLibrary> UIFactory::m_uiLib;

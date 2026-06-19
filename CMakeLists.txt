@@ -48,82 +48,114 @@ include_directories(
     ${OPENSSL_ROOT}/include                 # OpenSSL 头文件（libssh2依赖）
 )
 
-# 源文件列表
+# 源文件列表（按模块分组，对应目录结构）
 set(SOURCES
-    src/main.cpp                          # 程序入口
-    src/widget.cpp                        # 主窗口实现
-    src/mytextedit.cpp                    # 自定义文本编辑框实现
-    src/textCompleter.cpp                 # 智能补全功能实现
-    src/lineNumberArea.cpp                # 行号区域实现
-    # 核心层（接口实现 + 设计模式）
-    src/core/ConfigManager.cpp            # 配置管理器（单例）
-    src/core/FileOperator.cpp             # 文件操作器（观察者）
-    src/core/Subject.cpp                  # 观察者主题基类
-    src/core/ThemeManager.cpp             # 主题管理器（单例+工厂）
-    src/core/MarkdownParser.cpp           # Markdown→HTML解析器(Simple fallback)
-    src/core/MaddyParser.cpp              # maddy三方库Markdown解析器
-    src/core/CodeHighlighter.cpp          # 代码块语法高亮后处理
-    src/core/CodeSyntaxHighlighter.cpp    # 代码语法高亮器（Python/C++/JS）
-    src/core/HeaderSymbolScanner.cpp      # 自定义头文件符号扫描器（多语言 #include/import 解析）
-    src/core/HtmlCssResolver.cpp          # HTML CSS 解析器（<link> 标签解析+本地 CSS 内联注入）
-    src/core/CodeFormatter.cpp            # M4: 代码格式化器（clang-format/内置）
-    src/core/JsonValidator.cpp            # M10: JSON校验和格式化工具
-    # 核心层：UI库接口实现
-    src/core/DefaultUiLibrary.cpp          # 默认UI库实现（IUiLibrary接口）
-    # 工厂层
-    src/factory/UIFactory.cpp             # UI组件工厂
-    # UI组件层（现代化窗口）
-    src/ui/FramelessWindow.cpp            # 无边框窗口基类
-    src/ui/TitleBar.cpp                   # 自定义标题栏组件
-    src/ui/EditorTabBar.cpp              # VSCode风格文件标签页栏
-    src/ui/SideBar.cpp                   # 左侧资源管理面板
-    src/ui/SettingsPage.cpp              # 设置页面（标签页内嵌）
-    src/ui/MarkdownMode.cpp              # Markdown分屏编辑预览
-    src/ui/HtmlPreviewMode.cpp           # HTML分屏编辑预览（源码/预览/分屏三模式切换）
-    src/ui/FindReplaceBar.cpp            # 查找替换面板（持久化+正则+大小写+全部替换）
-    src/ui/EditorSplitView.cpp           # V1.9: 编辑器分栏视图（共享文档同步编辑）
-    src/ui/EmbeddedTerminal.cpp          # 内嵌终端（容器：标签/搜索/主题）
-    src/ui/TerminalView.cpp              # 终端统一视图（输入输出合一）
-    src/ui/TerminalBackend.cpp           # 终端进程后端（QProcess封装）
-    src/ui/CommandPalette.cpp            # 命令面板（Ctrl+Shift+P）
-    src/ui/DiffViewer.cpp                # M5: Diff视图（并排对比）
-    # M3: Git 集成
-    src/core/GitManager.cpp              # Git 版本控制管理器（git.exe 方案）
-    src/core/MergeConflictResolver.cpp   # V1.9: Git 合并冲突解决器
-    src/ui/GitPanel.cpp                  # 源代码管理面板 UI
-    # M9: 正则表达式测试器
-    src/ui/RegexTester.cpp               # 正则表达式测试工具面板
-    # M11: 图片预览器
-    src/ui/ImagePreviewer.cpp            # 图片文件预览组件
-    # M14: 代码片段管理
-    src/core/SnippetManager.cpp          # 代码片段管理器（CRUD + 触发 + 展开）
-    # M8: LSP 语言服务器客户端
-    src/core/LspClient.cpp              # LSP 通信框架（JSON-RPC 2.0）
-    src/core/LspManager.cpp             # LSP 管理器（门面+工厂，多语言客户端生命周期+信号路由）
-    # M13: SQLite 数据库浏览器
-    src/ui/SqliteBrowser.cpp            # 数据库浏览器组件
-    # M15: 任务系统增强
-    src/core/TaskManager.cpp            # 任务管理器（VSCode tasks.json 兼容）
-    # T7: 快捷键自定义系统
-    src/core/ShortcutManager.cpp        # 快捷键管理器（自定义/冲突检测/持久化）
-    src/core/ShortcutFilter.cpp         # 快捷键过滤器（Command+Filter+Observer模式）
-    # T8: 文件编码自动检测
-    src/core/EncodingDetector.cpp       # 编码检测器（UTF-8/GBK/UTF-16识别与转换）
-    # SSH 远程终端模块
-    src/interfaces/ISshClient.cpp        # ISshClient MOC触发（纯接口类信号需要MOC）
-    src/interfaces/ILspClient.cpp        # ILspClient MOC触发（LSP客户端抽象接口）
-    src/core/SshClient.cpp              # SSH客户端核心（libssh2封装）
-    src/core/SftpClient.cpp             # SFTP客户端（libssh2 SFTP封装）
-    src/core/ScreenGuard.cpp            # 屏幕安全守卫（跨屏/高DPI保护）
-    src/core/SshSessionManager.cpp      # SSH会话管理器（多连接/配置持久化）
-    src/ui/SshTerminalWidget.cpp        # SSH远程终端UI
-    src/ui/SshConfigPanel.cpp          # SSH连接配置面板（标签页内嵌）
-    src/ui/RemoteFileTree.cpp          # 远程文件树（SFTP远程文件浏览器）
-    # MD增强: TOC面板+图片灯箱+导出功能
-    src/ui/MdTocPanel.cpp               # Markdown目录树面板（可视化导航）
-    src/ui/ImageLightBox.cpp            # 图片灯箱预览（模态窗口+缩放）
-    src/ui/ModernDialog.cpp             # 现代化弹窗组件（替代原生QMessageBox）
-    src/core/MdExporter.cpp             # Markdown文档导出器（HTML/PDF）
+    # ===== app/ 应用入口层 =====
+    src/app/main.cpp                          # 程序入口
+
+    # ===== ui/shell/ 窗口外壳层 =====
+    src/ui/shell/Widget.cpp                   # 主窗口实现（阶段2将拆分为 MainWindow + Controllers）
+    src/ui/shell/FramelessWindow.cpp          # 无边框窗口基类（DWM磨砂+边缘缩放）
+    src/ui/shell/TitleBar.cpp                 # 自定义标题栏组件
+
+    # ===== ui/editor/ 编辑器视图层 =====
+    src/ui/editor/MyTextEdit.cpp              # 自定义文本编辑框（IEditorEdit实现）
+    src/ui/editor/TextCompleter.cpp           # 智能补全功能（ICompleter实现）
+    src/ui/editor/LineNumberArea.cpp          # 行号区域（ILineNumber实现）
+    src/ui/editor/EditorTabBar.cpp            # VSCode风格文件标签页栏（ITabWidget实现）
+    src/ui/editor/FindReplaceBar.cpp          # 查找替换面板（正则+大小写+全部替换）
+    src/ui/editor/EditorSplitView.cpp         # 编辑器分栏视图（共享文档同步编辑）
+
+    # ===== ui/markdown/ Markdown UI 层 =====
+    src/ui/markdown/MarkdownMode.cpp          # Markdown分屏编辑预览（IMarkdownViewer实现）
+    src/ui/markdown/HtmlPreviewMode.cpp       # HTML分屏编辑预览（三模式切换）
+    src/ui/markdown/MdTocPanel.cpp            # Markdown目录树面板
+    src/ui/markdown/ImageLightBox.cpp         # 图片灯箱预览（模态窗口+缩放）
+
+    # ===== ui/sidebar/ 侧边栏层 =====
+    src/ui/sidebar/SideBar.cpp                # 左侧资源管理面板（ISideFileBar实现）
+    src/ui/sidebar/GitPanel.cpp               # 源代码管理面板 UI
+
+    # ===== ui/terminal/ 终端层 =====
+    src/ui/terminal/EmbeddedTerminal.cpp      # 内嵌终端容器（ITerminalWidget实现）
+    src/ui/terminal/TerminalView.cpp          # 终端统一视图（ANSI解析+输入输出合一）
+    src/ui/terminal/TerminalBackend.cpp       # 终端进程后端（QProcess封装）
+    src/ui/terminal/SshTerminalWidget.cpp     # SSH远程终端UI（ITerminalWidget+ISshClient）
+
+    # ===== ui/remote/ 远程文件层 =====
+    src/ui/remote/RemoteFileTree.cpp          # 远程文件树（SFTP浏览器）
+    src/ui/remote/SshConfigPanel.cpp          # SSH连接配置面板
+
+    # ===== ui/tools/ 工具面板层 =====
+    src/ui/tools/CommandPalette.cpp           # 命令面板（Ctrl+Shift+P）
+    src/ui/tools/DiffViewer.cpp               # Diff视图（并排对比）
+    src/ui/tools/RegexTester.cpp              # 正则表达式测试器
+    src/ui/tools/ImagePreviewer.cpp           # 图片文件预览组件
+    src/ui/tools/SqliteBrowser.cpp            # SQLite数据库浏览器
+
+    # ===== ui/dialog/ 对话框层 =====
+    src/ui/dialog/ModernDialog.cpp            # 现代化弹窗组件
+
+    # ===== ui/settings/ 设置层 =====
+    src/ui/settings/SettingsPage.cpp          # 设置页面（标签页内嵌）
+
+    # ===== core/base/ 基础架构层 =====
+    src/core/base/Subject.cpp                 # 观察者主题基类
+    src/core/base/ScreenGuard.cpp             # 屏幕安全守卫（跨屏/高DPI保护）
+
+    # ===== core/config/ 配置与主题层 =====
+    src/core/config/ConfigManager.cpp         # 配置管理器（单例，IConfigManager实现）
+    src/core/config/ThemeManager.cpp          # 主题管理器（单例+工厂，IThemeManager实现）
+    src/core/config/DefaultUiLibrary.cpp      # 默认UI库实现（IUiLibrary接口）
+
+    # ===== core/fileio/ 文件IO层 =====
+    src/core/fileio/FileOperator.cpp          # 文件操作器（观察者，IFileOperator实现）
+    src/core/fileio/EncodingDetector.cpp      # 编码检测器（UTF-8/GBK/UTF-16识别）
+
+    # ===== core/editor/ 编辑器核心层 =====
+    src/core/editor/CodeSyntaxHighlighter.cpp # 代码语法高亮器（ISyntaxHighlighter实现）
+    src/core/editor/CodeHighlighter.cpp       # 代码块HTML高亮后处理
+    src/core/editor/HeaderSymbolScanner.cpp   # 头文件符号扫描器（#include/import解析）
+
+    # ===== core/format/ 格式化与校验层 =====
+    src/core/format/CodeFormatter.cpp         # 代码格式化器（clang-format/内置）
+    src/core/format/JsonValidator.cpp         # JSON校验和格式化工具
+
+    # ===== core/markdown/ Markdown核心层 =====
+    src/core/markdown/MaddyParser.cpp         # maddy三方库Markdown解析器（IMarkdownParser实现）
+    src/core/markdown/MarkdownParser.cpp      # 轻量Markdown解析器（fallback）
+    src/core/markdown/MdExporter.cpp          # Markdown导出器（HTML/PDF）
+    src/core/markdown/HtmlCssResolver.cpp     # HTML CSS解析器（link标签内联注入）
+
+    # ===== core/snippet/ 代码片段层 =====
+    src/core/snippet/SnippetManager.cpp       # 代码片段管理器（CRUD+触发+展开）
+
+    # ===== core/shortcut/ 快捷键层 =====
+    src/core/shortcut/ShortcutManager.cpp     # 快捷键管理器（自定义/冲突检测/持久化）
+    src/core/shortcut/ShortcutFilter.cpp      # 快捷键过滤器（Command+Filter+Observer）
+
+    # ===== core/lsp/ LSP层（IDE专属）=====
+    src/core/lsp/LspClient.cpp                # LSP通信框架（JSON-RPC 2.0，ILspClient实现）
+    src/core/lsp/LspManager.cpp               # LSP管理器（门面+工厂，多语言路由）
+
+    # ===== core/vcs/ 版本控制层（IDE专属）=====
+    src/core/vcs/GitManager.cpp               # Git版本控制管理器（git.exe方案）
+    src/core/vcs/MergeConflictResolver.cpp    # Git合并冲突解决器
+
+    # ===== core/remote/ 远程连接层（IDE专属）=====
+    src/core/remote/SshClient.cpp             # SSH客户端核心（libssh2封装，ISshClient实现）
+    src/core/remote/SftpClient.cpp            # SFTP客户端（libssh2 SFTP封装）
+    src/core/remote/SshSessionManager.cpp     # SSH会话管理器（多连接/配置持久化）
+
+    # ===== core/task/ 任务系统层（IDE专属）=====
+    src/core/task/TaskManager.cpp             # 任务管理器（VSCode tasks.json兼容）
+
+    # ===== interfaces/ 接口层（MOC触发文件）=====
+    src/interfaces/remote/ISshClient.cpp      # ISshClient MOC触发（纯接口类信号需要MOC）
+    src/interfaces/lsp/ILspClient.cpp         # ILspClient MOC触发（LSP客户端抽象接口）
+
+    # ===== factory/ 工厂层 =====
+    src/factory/UIFactory.cpp                 # UI组件工厂
 )
 
 # 资源文件列表(图标、配置文件等)
