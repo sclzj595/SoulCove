@@ -162,6 +162,7 @@ set(SOURCES
 
     # ===== controller/ 控制器层 =====
     src/controller/CommandRegistry.cpp        # 命令注册表（哈希表替代 if-else 链）
+    src/controller/EditorActions.cpp          # 编辑器操作（注释切换/大小写/格式化）
 )
 
 # 资源文件列表(图标、配置文件等)

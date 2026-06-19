@@ -7,6 +7,7 @@
 #include "core/config/ThemeManager.h"
 #include "core/shortcut/ShortcutFilter.h"
 #include "factory/UIFactory.h"
+#include "controller/EditorActions.h"
 #include "ui/settings/SettingsPage.h"
 #include "ui/tools/DiffViewer.h"
 #include "ui/tools/RegexTester.h"
@@ -2203,28 +2204,7 @@ void Widget::onCommandTriggered(const QString& commandId)
 void Widget::onFormatDocument()
 {
     if (!m_currentTextEdit || !m_tabBar) return;
-
-    QString currentPath = m_tabBar->currentFilePath();
-    QString code = m_currentTextEdit->toPlainText();
-
-    auto& formatter = CodeFormatter::instance();
-    QString formatted = formatter.format(code, currentPath);
-
-    // 保存光标位置和滚动位置
-    int pos = m_currentTextEdit->textCursor().position();
-    int scrollValue = 0;
-    // 通过 asWidget 获取实际编辑器控件访问滚动条
-    auto* editWidget = qobject_cast<MyTextEdit*>(m_currentTextEdit->asWidget());
-    if (editWidget)  scrollValue = editWidget->verticalScrollBar()->value();
-
-    m_currentTextEdit->setPlainText(formatted);
-
-    // 恢复光标位置（不超过文档长度）
-    QTextCursor cursor = m_currentTextEdit->textCursor();
-    cursor.setPosition(qMin(pos, formatted.length()));
-    m_currentTextEdit->setTextCursor(cursor);
-    if (editWidget)
-        editWidget->verticalScrollBar()->setValue(scrollValue);
+    EditorActions::formatDocument(m_currentTextEdit, m_tabBar->currentFilePath());
 }
 
 // ====================================================================
@@ -2281,108 +2261,19 @@ void Widget::onOpenInFolder()
 
 void Widget::onToggleLineComment()
 {
-    MyTextEdit* ed = qobject_cast<MyTextEdit*>(
-        m_currentTextEdit ? m_currentTextEdit->asWidget() : nullptr);
-    if (!ed) return;
-
-    // 根据文件后缀选择注释符号
+    if (!m_currentTextEdit) return;
     QString path = m_tabBar ? m_tabBar->currentFilePath() : QString();
-    QString suffix = QFileInfo(path).suffix().toLower();
-    QString commentToken;
-    if (suffix == "py" || suffix == "sh" || suffix == "yaml" || suffix == "yml"
-        || suffix == "rb" || suffix == "pl" || suffix == "r" || suffix == "conf"
-        || suffix == "toml" || suffix == "ini" || suffix == "properties"
-        || suffix == "dockerfile" || suffix == "makefile" || suffix == "cmake")
-        commentToken = "#";
-    else if (suffix == "sql")
-        commentToken = "--";
-    else
-        commentToken = "//";   // C/C++/Java/JS/Go/Rust/PHP 等
-
-    QTextCursor cursor = ed->textCursor();
-    QTextDocument* doc = ed->document();
-
-    int start = cursor.selectionStart();
-    int end = cursor.selectionEnd();
-    if (start > end) std::swap(start, end);
-
-    // 无选择：切换当前行
-    if (start == end) {
-        QTextBlock block = doc->findBlock(start);
-        if (!block.isValid()) return;
-        cursor.beginEditBlock();
-        QString text = block.text();
-        cursor.setPosition(block.position());
-        if (text.startsWith(commentToken + " ")) {
-            for (int i = 0; i < commentToken.length() + 1; ++i)
-                cursor.deleteChar();
-        } else if (text.startsWith(commentToken)) {
-            for (int i = 0; i < commentToken.length(); ++i)
-                cursor.deleteChar();
-        } else {
-            cursor.insertText(commentToken + " ");
-        }
-        cursor.endEditBlock();
-        return;
-    }
-
-    // 多行：先检查所有非空行是否都已注释
-    QTextBlock startBlock = doc->findBlock(start);
-    QTextBlock endBlock = doc->findBlock(end);
-    if (!startBlock.isValid() || !endBlock.isValid()) return;
-
-    bool allCommented = true;
-    for (QTextBlock b = startBlock; b.isValid() && b.position() <= endBlock.position(); b = b.next()) {
-        QString text = b.text();
-        if (!text.isEmpty() && !text.startsWith(commentToken)) {
-            allCommented = false;
-            break;
-        }
-    }
-
-    cursor.beginEditBlock();
-    for (QTextBlock b = startBlock; b.isValid() && b.position() <= endBlock.position(); b = b.next()) {
-        if (b.text().isEmpty()) continue;   // 空行跳过
-        cursor.setPosition(b.position());
-        if (allCommented) {
-            if (b.text().startsWith(commentToken + " ")) {
-                for (int i = 0; i < commentToken.length() + 1; ++i)
-                    cursor.deleteChar();
-            } else if (b.text().startsWith(commentToken)) {
-                for (int i = 0; i < commentToken.length(); ++i)
-                    cursor.deleteChar();
-            }
-        } else {
-            cursor.insertText(commentToken + " ");
-        }
-    }
-    cursor.endEditBlock();
+    EditorActions::toggleLineComment(m_currentTextEdit, path);
 }
 
 void Widget::onToUpperCase()
 {
-    MyTextEdit* ed = qobject_cast<MyTextEdit*>(
-        m_currentTextEdit ? m_currentTextEdit->asWidget() : nullptr);
-    if (!ed) return;
-    QTextCursor cursor = ed->textCursor();
-    if (!cursor.hasSelection()) return;
-    cursor.beginEditBlock();
-    QString selected = cursor.selectedText();
-    cursor.insertText(selected.toUpper());
-    cursor.endEditBlock();
+    EditorActions::toUpperCase(m_currentTextEdit);
 }
 
 void Widget::onToLowerCase()
 {
-    MyTextEdit* ed = qobject_cast<MyTextEdit*>(
-        m_currentTextEdit ? m_currentTextEdit->asWidget() : nullptr);
-    if (!ed) return;
-    QTextCursor cursor = ed->textCursor();
-    if (!cursor.hasSelection()) return;
-    cursor.beginEditBlock();
-    QString selected = cursor.selectedText();
-    cursor.insertText(selected.toLower());
-    cursor.endEditBlock();
+    EditorActions::toLowerCase(m_currentTextEdit);
 }
 
 // ========== LSP 语言服务器响应槽 ==========
