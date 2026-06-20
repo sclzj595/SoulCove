@@ -1,6 +1,7 @@
 #include "ui/sidebar/SideBar.h"
 #include "Logger.hpp"
 #include "ui/sidebar/GitPanel.h"
+#include "ui/sidebar/OutlinePanel.h"  // V1.9: 大纲面板（已抽出）
 #include "core/task/TaskManager.h"  // M15: 任务管理器
 
 #include <QDir>
@@ -293,42 +294,13 @@ SideBar::SideBar(QWidget* parent)
 
     m_panelStack->addWidget(m_extensionsPanel);
 
-    // --- Outline 面板（V1.9: 大纲/符号导航）---
-    m_outlinePanel = new QWidget();
-    auto* outlineLayout = new QVBoxLayout(m_outlinePanel);
-    outlineLayout->setContentsMargins(4, 6, 2, 2);
-    outlineLayout->setSpacing(2);
-
-    auto* outlineTitle = new QLabel(tr("大纲"), m_outlinePanel);
-    outlineTitle->setObjectName(QStringLiteral("panelTitle"));
-    outlineLayout->addWidget(outlineTitle);
-
-    m_outlineTree = new QTreeWidget(m_outlinePanel);
-    m_outlineTree->setObjectName(QStringLiteral("sideFileTree"));
-    m_outlineTree->setHeaderHidden(true);
-    m_outlineTree->setAnimated(true);
-    m_outlineTree->setIndentation(14);
-    m_outlineTree->setRootIsDecorated(true);
-    m_outlineTree->setSortingEnabled(false);
-    m_outlineTree->setSelectionMode(QAbstractItemView::SingleSelection);
-    // 使用支持 emoji 的字体
-    {
-        QFont emojiFont = m_outlineTree->font();
-        emojiFont.setFamilies({QStringLiteral("Segoe UI Emoji"),
-                               QStringLiteral("Apple Color Emoji"),
-                               QStringLiteral("Noto Color Emoji")});
-        m_outlineTree->setFont(emojiFont);
-    }
-    outlineLayout->addWidget(m_outlineTree);
-
-    // 提示标签（无符号时显示）
-    m_outlineHint = new QLabel(m_outlinePanel);
-    m_outlineHint->setObjectName(QStringLiteral("settingsHint"));
-    m_outlineHint->setWordWrap(true);
-    m_outlineHint->setText(tr("打开文件后显示符号大纲\n\n支持：\n• LSP 符号（精确）\n• 正则扫描（离线 fallback）"));
-    m_outlineHint->setAlignment(Qt::AlignCenter);
-    outlineLayout->addWidget(m_outlineHint);
-
+    // --- Outline 面板（V1.9: 大纲/符号导航，已抽出为 OutlinePanel）---
+    m_outlinePanel = new OutlinePanel(this);
+    // 转发面板的符号点击信号为 SideBar 的 outlineSymbolClicked 信号
+    connect(m_outlinePanel, &OutlinePanel::symbolClicked,
+            this, [this](const QString& filePath, int line, int col) {
+        emit outlineSymbolClicked(filePath, line, col);
+    });
     m_panelStack->addWidget(m_outlinePanel);
 
     panelOuterLayout->addWidget(m_panelStack);
@@ -389,9 +361,8 @@ SideBar::SideBar(QWidget* parent)
     connect(&tm, &TaskManager::taskFinished, this, &SideBar::onTaskFinished);
     connect(&tm, &TaskManager::taskOutput, this, &SideBar::onTaskOutput);
 
-    // V1.9: 大纲树点击 → 跳转信号
-    connect(m_outlineTree, &QTreeWidget::itemClicked,
-            this, &SideBar::onOutlineItemClicked);
+    // 注：大纲树点击信号由 OutlinePanel 内部处理并发射 symbolClicked，
+    //     SideBar 构造时已连接转发到 outlineSymbolClicked
 
     // 初始化任务树
     refreshTaskTree();
@@ -1422,235 +1393,20 @@ bool SideBar::handleTreeDropEvent(QDropEvent* event)
 }
 
 // ============================================================
-// V1.9: 大纲面板（符号导航）
+// V1.9: 大纲面板（符号导航）— 委托给 OutlinePanel
 // ============================================================
-
-QString SideBar::symbolIcon(int kind) const
-{
-    // LSP SymbolKind 映射到单字符图标
-    // 1=File 2=Module 3=Namespace 4=Package 5=Class 6=Method 7=Property
-    // 8=Field 9=Constructor 10=Enum 11=Interface 12=Function 13=Variable
-    // 14=Constant 15=String 16=Number 17=Boolean 18=Array 19=Object
-    // 20=Key 21=Null 22=EnumMember 23=Struct 24=Event 25=Operator 26=TypeParameter
-    switch (kind) {
-    case 1:  return QString::fromUtf8("\xF0\x9F\x93\x84"); // 📄 File
-    case 2:
-    case 3:
-    case 4:  return QString::fromUtf8("\xF0\x9F\x93\x81"); // 📁 Module/Namespace/Package
-    case 5:  return QStringLiteral("C");  // Class
-    case 6:  return QStringLiteral("M");  // Method
-    case 7:
-    case 8:  return QStringLiteral("F");  // Property/Field
-    case 9:  return QStringLiteral("C");  // Constructor
-    case 10: return QStringLiteral("E");  // Enum
-    case 11: return QStringLiteral("I");  // Interface
-    case 12: return QStringLiteral("f");  // Function
-    case 13: return QStringLiteral("V");  // Variable
-    case 14: return QStringLiteral("K");  // Constant
-    case 22: return QStringLiteral("m");  // EnumMember
-    case 23: return QStringLiteral("S");  // Struct
-    case 24: return QStringLiteral("~");  // Event
-    case 25: return QStringLiteral("O");  // Operator
-    case 26: return QStringLiteral("T");  // TypeParameter
-    default: return QStringLiteral("•");
-    }
-}
-
-void SideBar::extractSymbolPosition(const QVariantMap& sym, int& line, int& col) const
-{
-    line = 0;
-    col = 0;
-    // LSP documentSymbol 有两种格式：
-    // 1. DocumentSymbol：有 selectionRange（符号名精确范围）
-    // 2. SymbolInformation：有 location.range
-    QVariantMap range;
-    if (sym.contains(QStringLiteral("selectionRange"))) {
-        range = sym.value(QStringLiteral("selectionRange")).toMap();
-    } else if (sym.contains(QStringLiteral("location"))) {
-        QVariantMap loc = sym.value(QStringLiteral("location")).toMap();
-        range = loc.value(QStringLiteral("range")).toMap();
-    } else if (sym.contains(QStringLiteral("range"))) {
-        range = sym.value(QStringLiteral("range")).toMap();
-    }
-
-    if (range.contains(QStringLiteral("start"))) {
-        QVariantMap start = range.value(QStringLiteral("start")).toMap();
-        line = start.value(QStringLiteral("line")).toInt();
-        col = start.value(QStringLiteral("character")).toInt();
-    }
-}
-
-void SideBar::populateOutlineTreeFromList(QTreeWidgetItem* parent, const QList<QVariantMap>& symbols)
-{
-    for (const QVariantMap& sym : symbols) {
-        QString name = sym.value(QStringLiteral("name")).toString();
-        int kind = sym.value(QStringLiteral("kind")).toInt();
-        if (name.isEmpty()) continue;
-
-        int line = 0, col = 0;
-        extractSymbolPosition(sym, line, col);
-
-        auto* item = new QTreeWidgetItem(parent);
-        item->setText(0, symbolIcon(kind) + QStringLiteral(" ") + name);
-        item->setToolTip(0, tr("行 %1 · 列 %2").arg(line + 1).arg(col + 1));
-        // 存储跳转信息：UserRole=line, UserRole+1=col
-        item->setData(0, Qt::UserRole, line);
-        item->setData(0, Qt::UserRole + 1, col);
-
-        // 递归处理子符号（DocumentSymbol 格式）
-        QVariant childrenVar = sym.value(QStringLiteral("children"));
-        if (childrenVar.isValid()) {
-            QVariantList children = childrenVar.toList();
-            if (!children.isEmpty()) {
-                QList<QVariantMap> childMaps;
-                for (const QVariant& c : children) {
-                    childMaps.append(c.toMap());
-                }
-                populateOutlineTreeFromList(item, childMaps);
-            }
-        }
-    }
-}
-
-void SideBar::populateOutlineTree(QTreeWidgetItem* parent, const QVariantList& symbols)
-{
-    // 兼容旧接口：将 QVariantList 转为 QList<QVariantMap> 调用新接口
-    QList<QVariantMap> maps;
-    for (const QVariant& v : symbols) {
-        maps.append(v.toMap());
-    }
-    populateOutlineTreeFromList(parent, maps);
-}
 
 void SideBar::updateOutline(const QString& filePath, const QList<QVariantMap>& symbols)
 {
-    if (!m_outlineTree) return;
-
-    m_outlineFilePath = filePath;
-    m_outlineTree->clear();
-
-    if (symbols.isEmpty()) {
-        if (m_outlineHint) {
-            m_outlineHint->setText(tr("未获取到符号\n\n可能原因：\n• 当前文件无 LSP 支持\n• 文件为空"));
-            m_outlineHint->show();
-        }
-        return;
-    }
-
-    // 填充大纲树
-    populateOutlineTreeFromList(nullptr, symbols);
-    m_outlineTree->expandToDepth(1);
-
-    if (m_outlineHint) m_outlineHint->hide();
-
-    LOG_DEBUG("[SideBar] 大纲更新: " << symbols.size() << " 个顶层符号, file=" << filePath.toStdString());
+    if (m_outlinePanel) m_outlinePanel->updateOutline(filePath, symbols);
 }
 
 void SideBar::clearOutline()
 {
-    if (m_outlineTree) m_outlineTree->clear();
-    m_outlineFilePath.clear();
-    if (m_outlineHint) {
-        m_outlineHint->setText(tr("打开文件后显示符号大纲\n\n支持：\n• LSP 符号（精确）\n• 正则扫描（离线 fallback）"));
-        m_outlineHint->show();
-    }
+    if (m_outlinePanel) m_outlinePanel->clearOutline();
 }
 
 void SideBar::updateOutlineFromText(const QString& filePath, const QString& content)
 {
-    // V1.9: 离线正则扫描 fallback（无 LSP 时使用）
-    if (!m_outlineTree) return;
-
-    m_outlineFilePath = filePath;
-    m_outlineTree->clear();
-
-    QFileInfo fi(filePath);
-    QString suffix = fi.suffix().toLower();
-
-    // 简单正则匹配常见符号定义
-    // C/C++: class/struct/enum/function
-    // Python: class/def
-    // JS/TS: function/class/const
-    QList<QPair<QString, int>> entries;  // (显示文本, 行号)
-
-    QStringList lines = content.split(QLatin1Char('\n'));
-    QRegularExpression re;
-
-    if (suffix == QStringLiteral("py")) {
-        re.setPattern(QStringLiteral("^(\\s*)(class|def)\\s+(\\w+)"));
-    } else if (suffix == QStringLiteral("js") || suffix == QStringLiteral("ts")) {
-        re.setPattern(QStringLiteral("^(\\s*)(function|class|const|let|var)\\s+(\\w+)"));
-    } else if (suffix == QStringLiteral("cpp") || suffix == QStringLiteral("h") ||
-               suffix == QStringLiteral("hpp") || suffix == QStringLiteral("cc") ||
-               suffix == QStringLiteral("cxx") || suffix == QStringLiteral("c")) {
-        // C/C++: class/struct/enum/函数声明（简化匹配）
-        re.setPattern(QStringLiteral("^(\\s*)(class|struct|enum|namespace|void|int|bool|double|float|QString|auto|inline|static)\\s+(\\w+)"));
-    } else if (suffix == QStringLiteral("md")) {
-        // Markdown: 标题
-        re.setPattern(QStringLiteral("^(#{1,6})\\s+(.+)$"));
-    } else {
-        // 不支持的语言
-        if (m_outlineHint) {
-            m_outlineHint->setText(tr("该文件类型不支持离线大纲\n\n支持：\n• C/C++ (.cpp/.h)\n• Python (.py)\n• JS/TS (.js/.ts)\n• Markdown (.md)"));
-            m_outlineHint->show();
-        }
-        return;
-    }
-
-    for (int i = 0; i < lines.size(); ++i) {
-        auto m = re.match(lines[i]);
-        if (m.hasMatch()) {
-            QString indent = m.captured(1);
-            QString keyword = m.captured(2);
-            QString name = m.captured(3);
-            QString icon = QStringLiteral("•");
-
-            if (keyword == QStringLiteral("class") || keyword == QStringLiteral("struct"))
-                icon = QStringLiteral("C");
-            else if (keyword == QStringLiteral("def") || keyword == QStringLiteral("function"))
-                icon = QStringLiteral("f");
-            else if (keyword == QStringLiteral("enum"))
-                icon = QStringLiteral("E");
-            else if (keyword == QStringLiteral("namespace"))
-                icon = QStringLiteral("N");
-            else if (keyword.startsWith(QStringLiteral("#")))
-                icon = QStringLiteral("H");
-
-            QString text = icon + QStringLiteral(" ") + name;
-            entries.append(qMakePair(text, i));
-        }
-    }
-
-    if (entries.isEmpty()) {
-        if (m_outlineHint) {
-            m_outlineHint->setText(tr("未扫描到符号\n\n（离线正则扫描，结果可能不完整）"));
-            m_outlineHint->show();
-        }
-        return;
-    }
-
-    // 扁平添加（离线模式不构建层级）
-    for (const auto& e : entries) {
-        auto* item = new QTreeWidgetItem(m_outlineTree);
-        item->setText(0, e.first);
-        item->setToolTip(0, tr("行 %1").arg(e.second + 1));
-        item->setData(0, Qt::UserRole, e.second);  // 行号
-        item->setData(0, Qt::UserRole + 1, 0);     // 列号
-    }
-
-    if (m_outlineHint) m_outlineHint->hide();
-}
-
-void SideBar::onOutlineItemClicked(QTreeWidgetItem* item, int column)
-{
-    Q_UNUSED(column)
-    if (!item) return;
-
-    int line = item->data(0, Qt::UserRole).toInt();
-    int col = item->data(0, Qt::UserRole + 1).toInt();
-
-    if (m_outlineFilePath.isEmpty()) return;
-
-    // 发射跳转信号（行列均为 0-based）
-    emit outlineSymbolClicked(m_outlineFilePath, line, col);
+    if (m_outlinePanel) m_outlinePanel->updateOutlineFromText(filePath, content);
 }

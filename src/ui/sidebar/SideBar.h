@@ -23,6 +23,7 @@
 
 class GitPanel;
 class TaskManager;  // M15: 任务管理器（前向声明）
+class OutlinePanel;  // V1.9: 大纲面板（已抽出）
 class QDropEvent;   // V1.9: 文件树拖拽
 
 /// @brief VSCode风格左侧资源栏组件
@@ -156,9 +157,6 @@ private slots:
     /// @brief 终端按钮点击
     void onTerminalClicked();
 
-    // V1.9: 大纲面板槽函数
-    void onOutlineItemClicked(QTreeWidgetItem* item, int column);
-
     // M15: 任务面板槽函数
     void onTaskItemDoubleClicked(QTreeWidgetItem* item, int column);
     void onTaskItemContextMenu(const QPoint& pos);
@@ -209,18 +207,6 @@ private:
 
     /// @brief V1.9: 处理文件树拖拽事件（eventFilter 方式）
     bool handleTreeDropEvent(QDropEvent* event);
-
-    /// @brief V1.9: 递归填充大纲树（解析 LSP documentSymbol QVariantMap）
-    void populateOutlineTree(QTreeWidgetItem* parent, const QVariantList& symbols);
-
-    /// @brief V1.9: 递归填充大纲树（解析 LSP documentSymbol QVariantMap 列表）
-    void populateOutlineTreeFromList(QTreeWidgetItem* parent, const QList<QVariantMap>& symbols);
-
-    /// @brief V1.9: 根据 LSP SymbolKind 返回图标字符
-    QString symbolIcon(int kind) const;
-
-    /// @brief V1.9: 从 LSP symbol QVariantMap 中提取起始行/列
-    void extractSymbolPosition(const QVariantMap& sym, int& line, int& col) const;
 
     /// @brief M15: 刷新任务树
     void refreshTaskTree();
@@ -275,11 +261,8 @@ private:
     QPushButton*   m_btnStopAll;         // 停止全部按钮
     QPushButton*   m_btnConfigureTasks;  // 配置任务按钮
 
-    // === Outline 面板（V1.9: 大纲/符号导航）===
-    QWidget*       m_outlinePanel = nullptr;
-    QTreeWidget*   m_outlineTree = nullptr;
-    QLabel*        m_outlineHint = nullptr;     // 提示标签（无符号时显示）
-    QString        m_outlineFilePath;            // 当前大纲对应的文件路径
+    // === Outline 面板（V1.9: 大纲/符号导航，已抽出为 OutlinePanel）===
+    OutlinePanel*  m_outlinePanel = nullptr;  // 大纲面板（拥有 tree/hint/filePath）
 
     // === Extensions 面板 ===
     QWidget*       m_extensionsPanel;
