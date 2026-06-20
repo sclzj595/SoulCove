@@ -23,6 +23,7 @@ class LineNumberArea;
 class TextCompleter;
 class ILineNumber;
 class CodeSyntaxHighlighter;
+class CodeFoldingManager;
 
 /// @brief LSP 诊断信息（轻量结构，用于编辑器内联显示）
 struct LspDiagnosticOverlay {
@@ -83,7 +84,7 @@ public:
     int lineNumberAreaWidth() const;
     void lineNumberAreaPaintEvent(QPaintEvent* event);
 
-    // ========== 代码折叠 ==========
+    // ========== 代码折叠（委托给 CodeFoldingManager） ==========
     /// 切换指定行的折叠状态（由行号区点击触发）
     /// @param blockNumber 要折叠/展开的块号（0-based）
     void toggleFold(int blockNumber);
@@ -94,12 +95,11 @@ public:
     /// 判断指定块当前是否处于折叠状态
     bool isFolded(int blockNumber) const;
 
-    /// 获取折叠图标所在的行号列表（用于行号区绘制）
-    /// 返回所有可折叠块的块号
-    QList<int> foldableBlocks() const { return m_foldableBlocks; }
-
     /// 行号区鼠标点击处理（判断是否点击在折叠图标上）
     void lineNumberAreaClicked(const QPoint& pos, int areaWidth);
+
+    /// 获取代码折叠管理器（供行号区绘制调用 paintFoldIcon）
+    CodeFoldingManager* foldingManager() const { return m_foldingManager; }
 
     // ========== 补全相关（通过ICompleter接口）==========
     void setCompleter(ICompleter* completer);
@@ -276,23 +276,9 @@ private:
     // 注：detectFunctionSignature 已迁入 DoxygenGenerator，insertDoxygenComment 委托调用
 
     // ========== 代码折叠 ==========
-    struct FoldRegion {
-        int startBlock;    // 折叠起始块号（包含 { 的行）
-        int endBlock;      // 折叠结束块号（包含 } 的行）
-        bool folded;       // 是否已折叠
-    };
-    QList<FoldRegion> m_foldRegions;      // 当前所有折叠区域
-    QList<int> m_foldableBlocks;           // 可折叠的块号列表（用于绘制图标）
-    int m_foldIconSize = 14;               // 折叠图标尺寸
-
-    /// 扫描文档，更新可折叠区域（基于 {} 配对）
-    void scanFoldRegions();
-
-    /// 查找指定块号所属的折叠区域（返回 nullptr 表示不属于任何折叠区）
-    FoldRegion* findFoldRegion(int blockNumber);
-
-    /// 应用折叠状态到文档（隐藏/显示块）
-    void applyFoldState();
+    // 注：FoldRegion/m_foldRegions/m_foldableBlocks/m_foldIconSize/scanFoldRegions/
+    //     findFoldRegion/applyFoldState 已迁入 CodeFoldingManager
+    CodeFoldingManager* m_foldingManager = nullptr;  // 代码折叠管理器（拥有折叠状态）
 };
 
 #endif // MYTEXTEDIT_H

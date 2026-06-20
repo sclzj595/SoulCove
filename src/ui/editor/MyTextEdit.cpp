@@ -5,6 +5,7 @@
 #include "core/config/ConfigManager.h"
 #include "core/editor/CodeSyntaxHighlighter.h"
 #include "core/editor/DoxygenGenerator.h"
+#include "core/editor/CodeFoldingManager.h"
 #include "Logger.hpp"
 
 #include <QRegExp>
@@ -78,6 +79,15 @@ MyTextEdit::MyTextEdit(QWidget *parent) : QTextEdit(parent), lineNumersVisible(t
     // 加载缩进配置（tabSize / indentStyle）
     loadIndentConfig();
 
+    // ========== 代码折叠管理器初始化 ==========
+    m_foldingManager = new CodeFoldingManager(this, this);
+    // 注入回调解耦：findMatchingBracket 保留在 MyTextEdit（括号匹配也使用）
+    m_foldingManager->setFindMatchingBracketCallback(
+        [this](int pos) { return findMatchingBracket(pos); });
+    // 注入刷新回调：折叠状态变更后需刷新行号区
+    m_foldingManager->setRequestUpdateCallback(
+        [this]() { updateLineNumberArea(); });
+
     // 监听配置变更（设置页修改 tabSize/indentStyle 时实时生效）
     connect(&ConfigManager::instance(), &ConfigManager::configChanged,
             this, [this](const QString& key) {
@@ -143,8 +153,10 @@ void MyTextEdit::handleTextChanged()
         foldScanTimer->setSingleShot(true);
         foldScanTimer->setInterval(500);
         connect(foldScanTimer, &QTimer::timeout, this, [this]() {
-            scanFoldRegions();
-            updateLineNumberArea();
+            if (m_foldingManager) {
+                m_foldingManager->scanFoldRegions();
+                updateLineNumberArea();
+            }
         });
     }
     foldScanTimer->start();
@@ -719,28 +731,12 @@ void MyTextEdit::lineNumberAreaPaintEvent(QPaintEvent *event)
                             Qt::AlignCenter, number);
         }
 
-        // 绘制折叠图标（在行号区右侧）
-        if (isFoldable(block.blockNumber())) {
-            int iconSize = m_foldIconSize;
-            int iconX = areaWidget->width() - iconSize - 2;
-            int iconY = static_cast<int>(top + (fontMetrics().height() - iconSize) / 2);
-
-            // 绘制图标背景方块
-            painter.fillRect(iconX, iconY, iconSize, iconSize, palette.borderDefault);
-
-            // 绘制图标符号：折叠状态显示 ▶，展开状态显示 ▼
-            painter.setPen(palette.fgPrimary);
-            QFont iconFont = painter.font();
-            iconFont.setPointSize(qMax(6, editorSize - 3));
-            painter.setFont(iconFont);
-
-            if (isFolded(block.blockNumber())) {
-                painter.drawText(iconX, iconY, iconSize, iconSize,
-                                Qt::AlignCenter, QStringLiteral("\u25B6"));
-            } else {
-                painter.drawText(iconX, iconY, iconSize, iconSize,
-                                Qt::AlignCenter, QStringLiteral("\u25BC"));
-            }
+        // 绘制折叠图标（委托给 CodeFoldingManager）
+        if (m_foldingManager) {
+            int iconX = areaWidget->width() - m_foldingManager->foldIconSize() - 2;
+            m_foldingManager->paintFoldIcon(painter, block.blockNumber(),
+                                            iconX, static_cast<int>(top),
+                                            fontMetrics().height(), editorSize);
         }
 
         // 移动到下一个文本块
@@ -751,121 +747,28 @@ void MyTextEdit::lineNumberAreaPaintEvent(QPaintEvent *event)
 
 // ========== 代码折叠实现 ==========
 
-void MyTextEdit::scanFoldRegions()
-{
-    m_foldRegions.clear();
-    m_foldableBlocks.clear();
-
-    QTextBlock block = document()->firstBlock();
-    while (block.isValid()) {
-        QString text = block.text();
-        // 查找该行中 { 的位置（跳过字符串/注释中的 { 简化处理）
-        int bracePos = -1;
-        bool inString = false;
-        QChar stringChar;
-        for (int i = 0; i < text.size(); ++i) {
-            QChar ch = text[i];
-            if (inString) {
-                if (ch == stringChar && (i == 0 || text[i-1] != '\\')) inString = false;
-            } else {
-                if (ch == '"' || ch == '\'') { inString = true; stringChar = ch; }
-                else if (ch == '/' && i + 1 < text.size() && text[i+1] == '/') break;  // 行注释
-                else if (ch == '{') { bracePos = i; break; }
-            }
-        }
-
-        if (bracePos >= 0) {
-            // 查找匹配的 }
-            int startPos = block.position() + bracePos;
-            int endPos = findMatchingBracket(startPos);
-            if (endPos >= 0) {
-                QTextBlock endBlock = document()->findBlock(endPos);
-                if (endBlock.isValid() && endBlock.blockNumber() > block.blockNumber()) {
-                    FoldRegion region;
-                    region.startBlock = block.blockNumber();
-                    region.endBlock = endBlock.blockNumber();
-                    region.folded = false;
-                    m_foldRegions.append(region);
-                    m_foldableBlocks.append(block.blockNumber());
-                }
-            }
-        }
-        block = block.next();
-    }
-}
-
-MyTextEdit::FoldRegion* MyTextEdit::findFoldRegion(int blockNumber)
-{
-    for (auto& region : m_foldRegions) {
-        if (region.startBlock == blockNumber) return &region;
-    }
-    return nullptr;
-}
-
-void MyTextEdit::applyFoldState()
-{
-    // 遍历所有折叠区域，隐藏/显示块
-    QTextBlock block = document()->firstBlock();
-    while (block.isValid()) {
-        bool shouldHide = false;
-        for (const auto& region : m_foldRegions) {
-            if (region.folded && block.blockNumber() > region.startBlock &&
-                block.blockNumber() <= region.endBlock) {
-                shouldHide = true;
-                break;
-            }
-        }
-        block.setVisible(!shouldHide);
-        block = block.next();
-    }
-
-    // 触发布局更新
-    document()->markContentsDirty(0, document()->characterCount());
-    updateLineNumberArea();
-    viewport()->update();
-}
+// ========== 代码折叠（委托给 CodeFoldingManager） ==========
 
 void MyTextEdit::toggleFold(int blockNumber)
 {
-    FoldRegion* region = findFoldRegion(blockNumber);
-    if (!region) return;
-
-    region->folded = !region->folded;
-    applyFoldState();
+    if (m_foldingManager) m_foldingManager->toggleFold(blockNumber);
 }
 
 bool MyTextEdit::isFoldable(int blockNumber) const
 {
-    for (const auto& region : m_foldRegions) {
-        if (region.startBlock == blockNumber) return true;
-    }
-    return false;
+    return m_foldingManager ? m_foldingManager->isFoldable(blockNumber) : false;
 }
 
 bool MyTextEdit::isFolded(int blockNumber) const
 {
-    for (const auto& region : m_foldRegions) {
-        if (region.startBlock == blockNumber) return region.folded;
-    }
-    return false;
+    return m_foldingManager ? m_foldingManager->isFolded(blockNumber) : false;
 }
 
 void MyTextEdit::lineNumberAreaClicked(const QPoint& pos, int areaWidth)
 {
-    // 折叠图标绘制在行号区右侧，尺寸 m_foldIconSize
-    int iconX = areaWidth - m_foldIconSize - 2;
-
-    // 计算点击位置对应的块号
+    if (!m_foldingManager) return;
     QTextCursor cursor = cursorForPosition(QPoint(0, pos.y()));
-    if (cursor.isNull()) return;
-    int blockNumber = cursor.blockNumber();
-
-    // 检查是否点击在折叠图标区域
-    if (pos.x() >= iconX && pos.x() <= iconX + m_foldIconSize) {
-        if (isFoldable(blockNumber)) {
-            toggleFold(blockNumber);
-        }
-    }
+    m_foldingManager->onLineNumberAreaClicked(pos, areaWidth, cursor);
 }
 
 /// @brief 窗口大小改变事件
