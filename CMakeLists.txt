@@ -116,6 +116,7 @@ set(SOURCES
     src/core/editor/CodeSyntaxHighlighter.cpp # 代码语法高亮器（ISyntaxHighlighter实现）
     src/core/editor/CodeHighlighter.cpp       # 代码块HTML高亮后处理
     src/core/editor/HeaderSymbolScanner.cpp   # 头文件符号扫描器（#include/import解析）
+    src/core/editor/DoxygenGenerator.cpp      # Doxygen/Docstring 注释生成器
 
     # ===== core/format/ 格式化与校验层 =====
     src/core/format/CodeFormatter.cpp         # 代码格式化器（clang-format/内置）

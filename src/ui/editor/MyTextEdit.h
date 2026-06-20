@@ -163,7 +163,7 @@ public:
     /// 请求 LSP 补全（Ctrl+Space 触发）
     void requestLspCompletion();
 
-    /// 生成 Doxygen 注释并插入到光标上方（C/C++ Doxygen 风格）或 Python docstring (右键菜单 Ctrl+Shift+D)
+    /// 生成 Doxygen 注释并插入到光标上方（委托给 DoxygenGenerator）
     void insertDoxygenComment();
 
 signals:
@@ -273,8 +273,7 @@ private:
     void    insertIndent();              // 在光标处插入缩进（空格或Tab）
 
     // ========== 右键菜单 / Doxygen ==========
-    /// 查找光标前的函数/类定义签名（返回空字符串表示未找到）
-    QString detectFunctionSignature() const;
+    // 注：detectFunctionSignature 已迁入 DoxygenGenerator，insertDoxygenComment 委托调用
 
     // ========== 代码折叠 ==========
     struct FoldRegion {
