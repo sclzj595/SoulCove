@@ -118,6 +118,7 @@ set(SOURCES
     src/core/editor/HeaderSymbolScanner.cpp   # 头文件符号扫描器（#include/import解析）
     src/core/editor/DoxygenGenerator.cpp      # Doxygen/Docstring 注释生成器
     src/core/editor/CodeFoldingManager.cpp    # 代码折叠管理器（扫描/切换/图标绘制）
+    src/core/editor/MinimapRenderer.cpp       # 迷你地图渲染器（缩略图/视口指示/点击跳转）
 
     # ===== core/format/ 格式化与校验层 =====
     src/core/format/CodeFormatter.cpp         # 代码格式化器（clang-format/内置）

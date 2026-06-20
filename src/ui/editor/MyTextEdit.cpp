@@ -6,6 +6,7 @@
 #include "core/editor/CodeSyntaxHighlighter.h"
 #include "core/editor/DoxygenGenerator.h"
 #include "core/editor/CodeFoldingManager.h"
+#include "core/editor/MinimapRenderer.h"
 #include "Logger.hpp"
 
 #include <QRegExp>
@@ -50,7 +51,7 @@ MyTextEdit::MyTextEdit(QWidget *parent) : QTextEdit(parent), lineNumersVisible(t
 
     // 滚动条值变化时同步更新迷你地图视口指示器位置
     connect(this->verticalScrollBar(), &QScrollBar::valueChanged, this, [this]() {
-        if (m_minimapVisible) updateMinimap();
+        if (m_minimapRenderer && m_minimapRenderer->isVisible()) m_minimapRenderer->scheduleUpdate();
     });
 
     // 配置补全延迟定时器：单次触发，间隔100ms（避免输入时频繁更新补全列表）
@@ -62,19 +63,10 @@ MyTextEdit::MyTextEdit(QWidget *parent) : QTextEdit(parent), lineNumersVisible(t
     connect(this, &QTextEdit::textChanged, this, &MyTextEdit::handleTextChanged);
     connect(this, &QTextEdit::cursorPositionChanged, this, &MyTextEdit::cursorPositionChangedInternal);
 
-    // ========== 迷你地图初始化 (M7) ==========
-    m_minimapWidget = new QWidget(this);
-    m_minimapWidget->setObjectName(QStringLiteral("minimap"));
-    m_minimapWidget->setFixedWidth(80);
-    m_minimapWidget->setCursor(Qt::PointingHandCursor);
-
-    // 迷你地图点击事件 → 跳转编辑器位置
-    m_minimapWidget->installEventFilter(this);
-
-    // 延迟更新定时器（文本变更时延迟200ms再更新，避免频繁重绘）
-    m_minimapUpdateTimer.setSingleShot(true);
-    m_minimapUpdateTimer.setInterval(200);
-    connect(&m_minimapUpdateTimer, &QTimer::timeout, this, &MyTextEdit::updateMinimap);
+    // ========== 迷你地图渲染器初始化 (M7) ==========
+    // MinimapRenderer 构造时创建子控件并 installEventFilter，
+    // 鼠标点击/绘制事件由 MinimapRenderer::eventFilter 自身拦截处理
+    m_minimapRenderer = new MinimapRenderer(this, this);
 
     // 加载缩进配置（tabSize / indentStyle）
     loadIndentConfig();
@@ -141,9 +133,8 @@ void MyTextEdit::handleTextChanged()
         m_completer->hideCompletion();
     }
 
-    // 触发迷你地图延迟更新 (M7)
-    if (m_minimapVisible)
-        m_minimapUpdateTimer.start();
+    // 触发迷你地图延迟更新 (M7) — 委托给 MinimapRenderer
+    if (m_minimapRenderer) m_minimapRenderer->scheduleUpdate();
 
     // 代码折叠：文本变更时重新扫描折叠区域（防抖，避免频繁扫描）
     // 仅在补全器初始化后才扫描（避免 setPlainText 时触发）
@@ -348,19 +339,8 @@ bool MyTextEdit::eventFilter(QObject *obj, QEvent* event) {
         }
     }
 
-    // 迷你地图鼠标事件处理 (M7)
-    if (obj == m_minimapWidget) {
-        if (event->type() == QEvent::MouseButtonPress) {
-            auto* mouseEvent = static_cast<QMouseEvent*>(event);
-            onMinimapClicked(mouseEvent);
-            return true;
-        }
-        if (event->type() == QEvent::Paint) {
-            auto* paintEvent = static_cast<QPaintEvent*>(event);
-            paintMinimapEvent(paintEvent);
-            return true;
-        }
-    }
+    // 注：minimap widget 的事件由 MinimapRenderer::eventFilter 自身拦截处理
+    // （构造时已 m_minimapWidget->installEventFilter(m_minimapRenderer)）
     // 不做特殊的就是默认 插入缩进
     return QTextEdit::eventFilter(obj, event);
 }
@@ -643,8 +623,8 @@ void MyTextEdit::updateLineNumberArea()
     // 前导检查
     if (!lineNumersVisible)     return;
 
-    // 编辑器边界：左侧给行号留空间，右侧给迷你地图留空间
-    int rightMargin = (m_minimapVisible && m_minimapWidget) ? m_minimapWidget->width() : 0;
+    // 编辑器边界：左侧给行号留空间，右侧给迷你地图留空间（委托给 MinimapRenderer）
+    int rightMargin = m_minimapRenderer ? m_minimapRenderer->width() : 0;
     setViewportMargins(lineNumberAreaWidth(), 0, rightMargin, 0);
 
     // 更新行号区域几何位置（通过接口）
@@ -778,18 +758,9 @@ void MyTextEdit::resizeEvent(QResizeEvent* event)
     QTextEdit::resizeEvent(event);
     updateLineNumberArea();
 
-    // 更新迷你地图位置和大小 (M7)
-    if (m_minimapWidget && m_minimapVisible) {
-        // minimapWidget 是 this 的子控件，使用 this 的坐标系定位到右侧
-        int mapW = m_minimapWidget->width();
-        m_minimapWidget->setGeometry(
-            width() - mapW,
-            0,
-            mapW,
-            height());
-        m_minimapWidget->show();
-        // 触发一次更新
-        m_minimapUpdateTimer.start(100);
+    // 更新迷你地图位置和大小 (M7) — 委托给 MinimapRenderer
+    if (m_minimapRenderer) {
+        m_minimapRenderer->handleResize(width(), height());
     }
 }
 
@@ -1144,129 +1115,16 @@ bool MyTextEdit::isLineNumberVisible() const
     return lineNumersVisible;
 }
 
-// ========== 迷你地图实现 (M7) ==========
-
-void MyTextEdit::updateMinimap()
-{
-    if (!m_minimapWidget || !m_minimapVisible) return;
-
-    int w = m_minimapWidget->width();
-    int h = m_minimapWidget->height();
-
-    if (w <= 0 || h <= 0) return;
-
-    // 计算文档总高度和可见区域比例
-    QAbstractTextDocumentLayout* layout = document()->documentLayout();
-    qreal docHeight = layout->documentSize().height();
-    qreal visibleHeight = viewport()->height();
-
-    if (docHeight <= 0) {
-        m_minimapWidget->update();
-        return;
-    }
-
-    // 缩放比例
-    double scaleY = static_cast<double>(h) / docHeight;
-
-    // 创建缩略图（宽度固定80px，高度按比例）
-    delete m_minimapImage;
-    m_minimapImage = new QImage(w, h, QImage::Format_RGB32);
-
-    // 使用主题编辑器背景色（适配亮/暗模式）
-    const auto& themePalette = ThemeManager::instance().currentPalette();
-    m_minimapImage->fill(themePalette.bgEditor);
-
-    QPainter painter(m_minimapImage);
-
-    // 使用缩小的字体渲染文本
-    QFont miniFont = this->font();
-    miniFont.setPointSize(1);  // 极小字体
-    painter.setFont(miniFont);
-
-    // 渲染每一行（简化：只画文字颜色，保留语法高亮色相）
-    QTextBlock block = document()->firstBlock();
-    while (block.isValid()) {
-        QRectF blockRect = layout->blockBoundingRect(block);
-        int y = static_cast<int>(blockRect.top() * scaleY);
-        int lineH = qMax(1, static_cast<int>(blockRect.height() * scaleY));
-
-        QString text = block.text();
-        if (!text.isEmpty()) {
-            QColor fgColor = themePalette.fgPrimary;
-            painter.setPen(fgColor);
-            QString displayText = text.left(w / 2);
-            painter.drawText(1, y + lineH - 1, displayText);
-        }
-
-        block = block.next();
-    }
-
-    // 绘制可见区域指示器（半透明矩形）
-    drawMinimapViewport(painter, w, h, scaleY, visibleHeight);
-
-    painter.end();
-
-    // 触发重绘
-    m_minimapWidget->update();
-}
-
-void MyTextEdit::drawMinimapViewport(QPainter& painter, int w, int h, double scaleY, qreal visibleHeight)
-{
-    QScrollBar* vBar = verticalScrollBar();
-    int scrollMax = vBar->maximum();
-    int viewH = qMax(4, static_cast<int>(visibleHeight * scaleY));
-    int viewY;
-    if (scrollMax > 0) {
-        viewY = static_cast<int>(static_cast<double>(vBar->value()) / scrollMax * (h - viewH));
-    } else {
-        viewY = 0;
-    }
-
-    // 根据主题明暗选择指示器颜色
-    const auto& palette = ThemeManager::instance().currentPalette();
-    bool isLight = palette.bgEditor.lightness() > 128;
-    QColor fillColor = isLight ? QColor(0, 0, 0, 20) : QColor(255, 255, 255, 25);
-    QColor borderColor = isLight ? QColor(0, 0, 0, 50) : QColor(255, 255, 255, 80);
-
-    painter.fillRect(0, viewY, w, viewH, fillColor);
-    painter.setPen(borderColor);
-    painter.drawRect(0, viewY, w - 1, viewH - 1);
-}
-
-void MyTextEdit::paintMinimapEvent(QPaintEvent* event)
-{
-    if (!m_minimapImage || m_minimapImage->isNull()) return;
-
-    QPainter painter(m_minimapWidget);
-    painter.drawImage(event->rect(), *m_minimapImage, event->rect());
-}
-
-void MyTextEdit::onMinimapClicked(QMouseEvent* event)
-{
-    if (!m_minimapWidget) return;
-
-    // 点击位置转换为文档滚动位置
-    // [修复] 使用滚动条最大值正确计算比例，与 updateMinimap() 保持一致
-    QScrollBar* vBar = verticalScrollBar();
-    int scrollMax = vBar->maximum();
-    int minimapHeight = m_minimapWidget->height();
-
-    if (scrollMax <= 0 || minimapHeight <= 0) return;
-
-    double ratio = static_cast<double>(event->pos().y()) / minimapHeight;
-    int targetScroll = static_cast<int>(ratio * scrollMax);
-
-    verticalScrollBar()->setValue(targetScroll);
-}
+// ========== 迷你地图实现 (M7) — 委托给 MinimapRenderer ==========
 
 void MyTextEdit::toggleMinimap(bool visible)
 {
-    m_minimapVisible = visible;
-    if (m_minimapWidget) {
-        m_minimapWidget->setVisible(visible);
-        if (visible)
-            updateMinimap();
-    }
+    if (m_minimapRenderer) m_minimapRenderer->setVisible(visible);
+}
+
+bool MyTextEdit::isMinimapVisible() const
+{
+    return m_minimapRenderer ? m_minimapRenderer->isVisible() : false;
 }
 
 // ========== M8: LSP 诊断覆盖层实现 ==========

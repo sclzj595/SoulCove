@@ -24,6 +24,7 @@ class TextCompleter;
 class ILineNumber;
 class CodeSyntaxHighlighter;
 class CodeFoldingManager;
+class MinimapRenderer;
 
 /// @brief LSP 诊断信息（轻量结构，用于编辑器内联显示）
 struct LspDiagnosticOverlay {
@@ -139,19 +140,13 @@ public:
     /// 返回括号的配对字符
     static QChar matchingBracket(const QChar& ch);
 
-    // ========== 迷你地图 (M7) ==========
-    /// 更新缩略图
-    void updateMinimap();
-    /// 绘制视口指示器（由updateMinimap和滚动时调用）
-    void drawMinimapViewport(QPainter& painter, int w, int h, double scaleY, qreal visibleHeight);
+    // ========== 迷你地图（委托给 MinimapRenderer） ==========
     /// 切换迷你地图显隐
     void toggleMinimap(bool visible);
     /// 迷你地图是否可见
-    bool isMinimapVisible() const { return m_minimapVisible; }
-    /// 迷你地图绘制事件处理
-    void paintMinimapEvent(QPaintEvent* event);
-    /// 迷你地图点击事件处理
-    void onMinimapClicked(QMouseEvent* event);
+    bool isMinimapVisible() const;
+    /// 获取迷你地图渲染器（供 eventFilter/resizeEvent 委托调用）
+    MinimapRenderer* minimapRenderer() const { return m_minimapRenderer; }
 
     // ========== M8: LSP 诊断覆盖层 ==========
     /// 设置 LSP 诊断信息列表（由外部 LspClient 驱动更新）
@@ -252,11 +247,9 @@ private:
     void moveAllCursors(QTextCursor::MoveOperation op, QTextCursor::MoveMode mode = QTextCursor::MoveAnchor);  // 移动所有光标
     void clearSecondaryCursors();            // 清除所有次级光标
 
-    // ========== 迷你地图 (M7) ==========
-    QWidget*  m_minimapWidget = nullptr;     // 缩略图画布
-    QImage*   m_minimapImage = nullptr;      // 缓存的渲染图像
-    bool      m_minimapVisible = true;       // 是否显示迷你地图
-    QTimer    m_minimapUpdateTimer;           // 延迟更新定时器（避免频繁重绘）
+    // ========== 迷你地图 ==========
+    // 状态与子控件已迁入 MinimapRenderer（widget/image/timer/visible）
+    MinimapRenderer* m_minimapRenderer = nullptr;  // 迷你地图渲染器（拥有 widget/image/timer）
 
     // ========== M8: LSP 诊断覆盖层 ==========
     QList<LspDiagnosticOverlay> m_diagnostics;  // 当前文件的 LSP 诊断列表
