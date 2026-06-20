@@ -3,20 +3,10 @@
 
 #include <QWidget>
 #include <QPushButton>
-#include <QTreeWidget>
-#include <QTreeWidgetItem>
-#include <QLabel>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QMenu>
-#include <QAction>
 #include <QStackedWidget>
-#include <QLineEdit>
-#include <QListWidget>
-#include <QCheckBox>
-#include <QTextEdit>
-#include <QPlainTextEdit>
-#include <QDir>
+#include <QLabel>
 
 #include "core/config/ThemeManager.h"
 #include "interfaces/ui/ISideFileBar.h"
@@ -26,7 +16,7 @@ class TaskManager;  // M15: 任务管理器（前向声明）
 class OutlinePanel;  // V1.9: 大纲面板（已抽出）
 class TasksPanel;    // M15: 任务面板（已抽出）
 class SearchPanel;   // 搜索面板（已抽出）
-class QDropEvent;   // V1.9: 文件树拖拽
+class ExplorerPanel; // 资源管理器面板（已抽出）
 
 /// @brief VSCode风格左侧资源栏组件
 /// 包含活动图标栏（Activity Bar）+ 可折叠内容区域
@@ -48,9 +38,6 @@ public:
     };
 
     explicit SideBar(QWidget* parent = nullptr);
-
-    /// @brief V1.9: 事件过滤器 — 拦截文件树的拖拽事件
-    bool eventFilter(QObject* obj, QEvent* event) override;
 
     /// @brief 切换到指定活动面板
     void switchToActivity(Activity activity);
@@ -146,13 +133,9 @@ signals:
 
 private slots:
     void onActivityButtonClicked();
-    void onFileItemDoubleClicked(QTreeWidgetItem* item, int column);
-    void onFileItemClicked(QTreeWidgetItem* item, int column);
-    void onFileContextMenu(const QPoint& pos);
-    void onExplorerNewFile();
-    void onExplorerRefresh();
-    void onExplorerCollapseAll();
-    void onExplorerOpenFolder();
+
+    /// @brief 处理 ExplorerPanel 的"打开文件夹"按钮点击（QFileDialog + setWorkDirectory）
+    void onExplorerOpenFolderClicked();
 
     /// @brief 终端按钮点击
     void onTerminalClicked();
@@ -161,20 +144,8 @@ private:
     /// @brief 创建活动图标按钮
     QPushButton* createActivityBtn(const QString& iconText, Activity activity, const QString& tooltip = QString());
 
-    /// @brief 递归填充文件树
-    void populateFileTree(QTreeWidgetItem* parentItem, const QDir& dir);
-
-    /// @brief 根据后缀获取文件图标
-    QString fileIcon(const QString& suffix) const;
-
     /// @brief 主题切换时刷新活动按钮样式
     void refreshActivityStyles();
-
-    /// @brief 在树中递归查找匹配路径的项
-    QTreeWidgetItem* findTreeItemByPath(QTreeWidgetItem* parent, const QString& filePath) const;
-
-    /// @brief V1.9: 处理文件树拖拽事件（eventFilter 方式）
-    bool handleTreeDropEvent(QDropEvent* event);
 
     // === 布局 ===
     QHBoxLayout* m_mainLayout;
@@ -192,16 +163,8 @@ private:
     QPushButton*  m_btnExtensions;
     QPushButton*  m_btnTerminal;      // 终端切换按钮
 
-    // === Explorer 面板 ===
-    QWidget*       m_explorerPanel;
-    QWidget*       m_explorerHeader;     // 头部工具栏区域
-    QLabel*        m_panelTitle;
-    QLabel*        m_pathLabel;          // 当前工作目录路径显示
-    QPushButton*   m_btnNewFile;         // 新建文件按钮
-    QPushButton*   m_btnOpenFolder;      // 打开文件夹按钮
-    QPushButton*   m_btnRefresh;         // 刷新按钮
-    QPushButton*   m_btnCollapseAll;     // 折叠全部按钮
-    QTreeWidget*   m_fileTree;           // 文件树（替代原QListWidget）
+    // === Explorer 面板（已抽出为 ExplorerPanel）===
+    ExplorerPanel* m_explorerPanel = nullptr;  // 资源管理器面板（拥有 fileTree/header/buttons）
 
     // === Search 面板（已抽出为 SearchPanel）===
     SearchPanel*   m_searchPanel = nullptr;  // 搜索面板（拥有 input/results/options）
