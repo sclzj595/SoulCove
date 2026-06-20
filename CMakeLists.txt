@@ -76,6 +76,7 @@ set(SOURCES
     src/ui/sidebar/SideBar.cpp                # 左侧资源管理面板（ISideFileBar实现）
     src/ui/sidebar/GitPanel.cpp               # 源代码管理面板 UI
     src/ui/sidebar/OutlinePanel.cpp           # 大纲面板（LSP符号/离线正则扫描）
+    src/ui/sidebar/TasksPanel.cpp             # 任务面板（任务树/输出/运行停止）
 
     # ===== ui/terminal/ 终端层 =====
     src/ui/terminal/EmbeddedTerminal.cpp      # 内嵌终端容器（ITerminalWidget实现）

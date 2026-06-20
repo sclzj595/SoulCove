@@ -24,6 +24,7 @@
 class GitPanel;
 class TaskManager;  // M15: 任务管理器（前向声明）
 class OutlinePanel;  // V1.9: 大纲面板（已抽出）
+class TasksPanel;    // M15: 任务面板（已抽出）
 class QDropEvent;   // V1.9: 文件树拖拽
 
 /// @brief VSCode风格左侧资源栏组件
@@ -157,16 +158,6 @@ private slots:
     /// @brief 终端按钮点击
     void onTerminalClicked();
 
-    // M15: 任务面板槽函数
-    void onTaskItemDoubleClicked(QTreeWidgetItem* item, int column);
-    void onTaskItemContextMenu(const QPoint& pos);
-    void onRunTaskClicked();
-    void onStopAllTasksClicked();
-    void onConfigureTasksClicked();
-    void onTaskStarted(const QString& label);
-    void onTaskFinished(const QString& label, int exitCode, const QString& output);
-    void onTaskOutput(const QString& label, const QString& output);
-
 private:
     /// @brief 创建活动图标按钮
     QPushButton* createActivityBtn(const QString& iconText, Activity activity, const QString& tooltip = QString());
@@ -207,9 +198,6 @@ private:
 
     /// @brief V1.9: 处理文件树拖拽事件（eventFilter 方式）
     bool handleTreeDropEvent(QDropEvent* event);
-
-    /// @brief M15: 刷新任务树
-    void refreshTaskTree();
 
     // === 布局 ===
     QHBoxLayout* m_mainLayout;
@@ -253,13 +241,8 @@ private:
     QWidget*       m_gitPanel;
     GitPanel*      m_gitPanelWidget;     // Git 源代码管理面板（替代原TODO列表）
 
-    // === Tasks 面板（M15: 任务系统）===
-    QWidget*       m_tasksPanel;         // 任务面板容器
-    QTreeWidget*   m_taskTree;           // 任务树（分组显示）
-    QPlainTextEdit* m_taskOutputView;     // 任务输出区域
-    QPushButton*   m_btnRunTask;          // 运行任务按钮
-    QPushButton*   m_btnStopAll;         // 停止全部按钮
-    QPushButton*   m_btnConfigureTasks;  // 配置任务按钮
+    // === Tasks 面板（M15: 任务系统，已抽出为 TasksPanel）===
+    TasksPanel*    m_tasksPanel = nullptr;  // 任务面板（拥有 tree/output/buttons）
 
     // === Outline 面板（V1.9: 大纲/符号导航，已抽出为 OutlinePanel）===
     OutlinePanel*  m_outlinePanel = nullptr;  // 大纲面板（拥有 tree/hint/filePath）

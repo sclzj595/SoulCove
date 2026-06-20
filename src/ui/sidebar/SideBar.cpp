@@ -2,7 +2,7 @@
 #include "Logger.hpp"
 #include "ui/sidebar/GitPanel.h"
 #include "ui/sidebar/OutlinePanel.h"  // V1.9: 大纲面板（已抽出）
-#include "core/task/TaskManager.h"  // M15: 任务管理器
+#include "ui/sidebar/TasksPanel.h"    // M15: 任务面板（已抽出）
 
 #include <QDir>
 #include <QDirIterator>
@@ -224,56 +224,8 @@ SideBar::SideBar(QWidget* parent)
 
     m_panelStack->addWidget(m_gitPanel);
 
-    // --- Tasks 面板（M15: 任务系统）---
-    m_tasksPanel = new QWidget();
-    auto* tasksLayout = new QVBoxLayout(m_tasksPanel);
-    tasksLayout->setContentsMargins(4, 6, 2, 2);
-    tasksLayout->setSpacing(2);
-
-    auto* tasksTitle = new QLabel(tr("任务"), m_tasksPanel);
-    tasksTitle->setObjectName(QStringLiteral("panelTitle"));
-    tasksLayout->addWidget(tasksTitle);
-
-    // 任务树（分组显示）
-    m_taskTree = new QTreeWidget(m_tasksPanel);
-    m_taskTree->setObjectName(QStringLiteral("sideFileTree"));
-    m_taskTree->setHeaderHidden(true);
-    m_taskTree->setAnimated(true);
-    m_taskTree->setIndentation(12);
-    m_taskTree->setRootIsDecorated(true);
-    m_taskTree->setColumnCount(1);
-    m_taskTree->setContextMenuPolicy(Qt::CustomContextMenu);
-    tasksLayout->addWidget(m_taskTree, 1);
-
-    // 工具栏按钮
-    auto* taskBtnLayout = new QHBoxLayout();
-    m_btnRunTask = new QPushButton(tr("▶ 运行"), m_tasksPanel);
-    m_btnRunTask->setFixedSize(70, 24);
-    m_btnRunTask->setObjectName(QStringLiteral("btnResetSection"));
-    m_btnStopAll = new QPushButton(tr("⏹ 停止全部"), m_tasksPanel);
-    m_btnStopAll->setFixedSize(80, 24);
-    m_btnStopAll->setObjectName(QStringLiteral("btnResetSection"));
-    m_btnConfigureTasks = new QPushButton(tr("⚙ 配置"), m_tasksPanel);
-    m_btnConfigureTasks->setFixedSize(70, 24);
-    m_btnConfigureTasks->setObjectName(QStringLiteral("btnResetSection"));
-    taskBtnLayout->addWidget(m_btnRunTask);
-    taskBtnLayout->addWidget(m_btnStopAll);
-    taskBtnLayout->addWidget(m_btnConfigureTasks);
-    taskBtnLayout->addStretch();
-    tasksLayout->addLayout(taskBtnLayout);
-
-    // 输出区域
-    auto* outputLabel = new QLabel(tr("输出"), m_tasksPanel);
-    outputLabel->setObjectName(QStringLiteral("settingsSectionTitle"));
-    tasksLayout->addWidget(outputLabel);
-
-    m_taskOutputView = new QPlainTextEdit(m_tasksPanel);
-    m_taskOutputView->setReadOnly(true);
-    m_taskOutputView->setObjectName(QStringLiteral("settingsHint"));
-    m_taskOutputView->setFont(QFont("Consolas", 9));
-    m_taskOutputView->setMaximumHeight(150);
-    tasksLayout->addWidget(m_taskOutputView);
-
+    // --- Tasks 面板（M15: 任务系统，已抽出为 TasksPanel）---
+    m_tasksPanel = new TasksPanel(this);
     m_panelStack->addWidget(m_tasksPanel);
 
     // --- Extensions 面板 ---
@@ -346,26 +298,9 @@ SideBar::SideBar(QWidget* parent)
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged,
             this, &SideBar::refreshActivityStyles);
 
-    // M15: 任务面板信号连接
-    connect(m_taskTree, &QTreeWidget::itemDoubleClicked,
-            this, &SideBar::onTaskItemDoubleClicked);
-    connect(m_taskTree, &QTreeWidget::customContextMenuRequested,
-            this, &SideBar::onTaskItemContextMenu);
-    connect(m_btnRunTask, &QPushButton::clicked, this, &SideBar::onRunTaskClicked);
-    connect(m_btnStopAll, &QPushButton::clicked, this, &SideBar::onStopAllTasksClicked);
-    connect(m_btnConfigureTasks, &QPushButton::clicked, this, &SideBar::onConfigureTasksClicked);
-
-    // 连接 TaskManager 信号
-    auto& tm = TaskManager::instance();
-    connect(&tm, &TaskManager::taskStarted, this, &SideBar::onTaskStarted);
-    connect(&tm, &TaskManager::taskFinished, this, &SideBar::onTaskFinished);
-    connect(&tm, &TaskManager::taskOutput, this, &SideBar::onTaskOutput);
-
+    // 注：Tasks 面板的信号连接由 TasksPanel 内部处理（直连 TaskManager 单例）
     // 注：大纲树点击信号由 OutlinePanel 内部处理并发射 symbolClicked，
     //     SideBar 构造时已连接转发到 outlineSymbolClicked
-
-    // 初始化任务树
-    refreshTaskTree();
 }
 
 QPushButton* SideBar::createActivityBtn(const QString& iconText, Activity activity, const QString& tooltip)
@@ -513,6 +448,7 @@ void SideBar::setWorkDirectory(const QString& dirPath)
         m_workspaceFolders.append(dirPath);
     }
     m_workDir = dirPath;
+    if (m_tasksPanel) m_tasksPanel->setWorkDirectory(m_workDir);
     refreshFileList();
     emit workspaceFoldersChanged(m_workspaceFolders);
 }
@@ -531,6 +467,7 @@ bool SideBar::addWorkspaceFolder(const QString& dirPath)
     // 兼容 m_workDir（保持为第一个文件夹）
     if (m_workspaceFolders.size() == 1) {
         m_workDir = absPath;
+        if (m_tasksPanel) m_tasksPanel->setWorkDirectory(m_workDir);
     }
     refreshFileList();
     emit workspaceFoldersChanged(m_workspaceFolders);
@@ -548,6 +485,7 @@ void SideBar::removeWorkspaceFolder(int index)
     } else {
         m_workDir = m_workspaceFolders.first();
     }
+    if (m_tasksPanel) m_tasksPanel->setWorkDirectory(m_workDir);
     refreshFileList();
     emit workspaceFoldersChanged(m_workspaceFolders);
 }
@@ -556,6 +494,7 @@ void SideBar::clearWorkspace()
 {
     m_workspaceFolders.clear();
     m_workDir.clear();
+    if (m_tasksPanel) m_tasksPanel->setWorkDirectory(m_workDir);
     refreshFileList();
     emit workspaceFoldersChanged(m_workspaceFolders);
 }
@@ -1145,177 +1084,6 @@ void SideBar::onSearchResultDoubleClicked(QListWidgetItem* item)
         // 兼容旧结果（无类型标记）：仅打开文件
         emit fileOpenRequested(filePath);
     }
-}
-
-// ============================================================
-// M15: 任务面板槽函数
-// ============================================================
-
-void SideBar::refreshTaskTree()
-{
-    m_taskTree->clear();
-
-    auto& tm = TaskManager::instance();
-    QStringList groups = {QStringLiteral("build"), QStringLiteral("run"),
-                         QStringLiteral("test"), QStringLiteral("lint"), QStringLiteral("format")};
-
-    // 分组图标映射
-    QMap<QString, QString> groupIcons = {
-        {QStringLiteral("build"),  QString::fromUtf8("\xF0\x9F\x94\xA8")},   // 🚨
-        {QStringLiteral("run"),    QString::fromUtf8("\xE2\x96\xBA")},       // ▶
-        {QStringLiteral("test"),   QString::fromUtf8("\xE2\x9C\x94")},       // ✔
-        {QStringLiteral("lint"),   QString::fromUtf8("\xF0\x9F\x94\x8D")},   // 🔍
-        {QStringLiteral("format"), QString::fromUtf8("\xE2\x9C\xA8")}        // ✨
-    };
-
-    for (const QString& grp : groups) {
-        QList<TaskItem> tasks = tm.tasksByGroup(grp);
-        if (tasks.isEmpty()) continue;
-
-        // 创建分组节点
-        auto* groupItem = new QTreeWidgetItem(m_taskTree);
-        groupItem->setText(0, groupIcons.value(grp) + QStringLiteral(" ") + (grp == QStringLiteral("build") ? tr("构建")
-                              : grp == QStringLiteral("run")    ? tr("运行")
-                              : grp == QStringLiteral("test")   ? tr("测试")
-                              : grp == QStringLiteral("lint")   ? tr("检查")
-                              : tr("格式化")));
-        groupItem->setExpanded(true);
-
-        for (const TaskItem& t : tasks) {
-            auto* taskItem = new QTreeWidgetItem(groupItem);
-
-            // 状态前缀：运行中/成功/失败
-            QString prefix;
-            if (tm.isTaskRunning(t.label)) {
-                prefix = QString::fromUtf8("\xE2\x8F\xB0");  // ⟳ 运行中
-            } else if (t.exitCode == 0 && t.lastRun.isValid()) {
-                prefix = QString::fromUtf8("\xE2\x9C\x93");      // ✓ 成功
-            } else if (t.exitCode != 0 && t.lastRun.isValid()) {
-                prefix = QString::fromUtf8("\xE2\x9C\x97");      // ✗ 失败
-            } else {
-                prefix = QStringLiteral("  ");
-            }
-
-            taskItem->setText(0, prefix + QStringLiteral(" ") + t.label);
-            taskItem->setData(0, Qt::UserRole, t.label);
-            taskItem->setData(0, Qt::UserRole + 1, grp);
-        }
-    }
-}
-
-void SideBar::onTaskItemDoubleClicked(QTreeWidgetItem* item, int column)
-{
-    Q_UNUSED(column)
-    if (!item) return;
-
-    QString label = item->data(0, Qt::UserRole).toString();
-    if (!label.isEmpty()) {
-        TaskManager::instance().runTask(label);
-    }
-}
-
-void SideBar::onTaskItemContextMenu(const QPoint& pos)
-{
-    QTreeWidgetItem* item = m_taskTree->itemAt(pos);
-    if (!item) return;
-
-    QMenu menu(this);
-    QString label = item->data(0, Qt::UserRole).toString();
-
-    QAction* actRun = menu.addAction(tr("▶ 运行任务"));
-    connect(actRun, &QAction::triggered, this, [this, label]() {
-        if (!label.isEmpty()) TaskManager::instance().runTask(label);
-    });
-
-    menu.addSeparator();
-
-    QAction* actCopyCmd = menu.addAction(tr("复制命令"));
-    connect(actCopyCmd, &QAction::triggered, this, [this, label]() {
-        if (!label.isEmpty()) {
-            TaskItem t = TaskManager::instance().task(label);
-            QApplication::clipboard()->setText(t.command + QStringLiteral(" ") + t.args.join(QLatin1Char(' ')));
-        }
-    });
-
-    menu.exec(m_taskTree->mapToGlobal(pos));
-}
-
-void SideBar::onRunTaskClicked()
-{
-    // 运行当前选中的任务
-    QTreeWidgetItem* item = m_taskTree->currentItem();
-    if (item) {
-        QString label = item->data(0, Qt::UserRole).toString();
-        if (!label.isEmpty()) {
-            TaskManager::instance().runTask(label);
-            return;
-        }
-    }
-    // 如果没有选中，提示
-    m_taskOutputView->appendPlainText(tr("> 请先在上方选择一个任务"));
-}
-
-void SideBar::onStopAllTasksClicked()
-{
-    TaskManager::instance().stopAll();
-    m_taskOutputView->appendPlainText(tr("> 已停止所有正在运行的任务"));
-}
-
-void SideBar::onConfigureTasksClicked()
-{
-    // 打开或保存 tasks.json
-    QString tasksPath = m_workDir + QStringLiteral("/.vscode/tasks.json");
-
-    // 尝试加载已有配置
-    if (QFile::exists(tasksPath)) {
-        TaskManager::instance().loadTasksJson(tasksPath);
-        refreshTaskTree();
-        m_taskOutputView->appendPlainText(tr("> 已加载: %1").arg(tasksPath));
-    } else {
-        // 首次使用，创建默认配置
-        QDir().mkpath(QFileInfo(tasksPath).absolutePath());
-        TaskManager::instance().saveTasksJson(tasksPath);
-        m_taskOutputView->appendPlainText(tr("> 已创建默认 tasks.json: %1").arg(tasksPath));
-    }
-}
-
-void SideBar::onTaskStarted(const QString& label)
-{
-    m_taskOutputView->appendPlainText(QStringLiteral("> ▶ %1 ...").arg(label));
-    refreshTaskTree();  // 更新状态图标
-}
-
-void SideBar::onTaskFinished(const QString& label, int exitCode, const QString& output)
-{
-    QString icon = (exitCode == 0) ? QString::fromUtf8("\xE2\x9C\x93") : QString::fromUtf8("\xE2\x9C\x97");
-    m_taskOutputView->appendPlainText(QStringLiteral("%1 [%2] 退出码: %3").arg(icon).arg(label).arg(exitCode));
-
-    // 显示最后几行输出（如果有）
-    QStringList lines = output.split(QLatin1Char('\n'));
-    if (lines.size() > 5) {
-        m_taskOutputView->appendPlainText(tr("  (最后5行输出):"));
-        for (int i = qMax(0, lines.size() - 5); i < lines.size(); ++i) {
-            m_taskOutputView->appendPlainText(QStringLiteral("  | ") + lines[i].trimmed());
-        }
-    }
-
-    refreshTaskTree();  // 更新状态图标
-}
-
-void SideBar::onTaskOutput(const QString& label, const QString& output)
-{
-    // 实时追加输出到面板
-    QStringList lines = output.split(QLatin1Char('\n'));
-    for (const QString& line : lines) {
-        if (!line.trimmed().isEmpty()) {
-            m_taskOutputView->appendPlainText(QStringLiteral("[%1] %2").arg(label, line.trimmed()));
-        }
-    }
-
-    // 自动滚动到底部
-    QTextCursor cursor = m_taskOutputView->textCursor();
-    cursor.movePosition(QTextCursor::End);
-    m_taskOutputView->setTextCursor(cursor);
 }
 
 // ============================================================
