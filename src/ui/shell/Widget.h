@@ -10,8 +10,9 @@
 #include "ui/tools/CommandPalette.h"
 #include "core/format/CodeFormatter.h"
 #include "ui/sidebar/GitPanel.h"
-#include "core/lsp/LspManager.h"
+#include "core/lsp/LspManager.h"  // LspCompletionItem/LspDiagnostic 等类型仍需使用
 #include "controller/CommandRegistry.h"
+#include "controller/LspCoordinator.h"
 
 #include "interfaces/core/IObserver.h"
 #include "interfaces/core/IFileOperator.h"
@@ -155,8 +156,7 @@ private slots:
     void onToLowerCase();            // 选中文本转小写
 
     // === LSP 语言服务器响应槽 ===
-    void onLspCompletionsReady(const QString& filePath, const QList<LspCompletionItem>& items);
-    void onLspDiagnosticsReady(const QString& filePath, const QList<LspDiagnostic>& diagnostics);
+    // 补全/诊断/符号路由已下沉到 LspCoordinator，Widget 仅保留 UI 交互级响应
     void onLspDefinitionReady(const QString& filePath, const QString& uri, int line, int col);
     void onLspHoverReady(const QString& filePath, const QString& documentation);
     void onLspReferencesReady(const QString& filePath, const QList<QVariantMap>& references);
@@ -240,7 +240,7 @@ private:
     GitPanel* m_gitPanel = nullptr;
 
     // === LSP 语言服务器管理器（门面模式，多语言客户端生命周期+信号路由）===
-    LspManager* m_lspManager = nullptr;
+    LspCoordinator* m_lspCoordinator = nullptr;  // LSP 协调器（拥有 LspManager）
 
     // ========== 辅助方法 ==========
     /// 注册快捷键命令（通过 ShortcutFilter 统一管理，Command+Filter+Observer 模式）

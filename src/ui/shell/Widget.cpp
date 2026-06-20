@@ -139,24 +139,23 @@ Widget::Widget(QWidget *parent)
         }
     });
 
-    // 7. 初始化 LSP 语言服务器管理器（门面模式，多语言客户端生命周期+信号路由）
-    m_lspManager = new LspManager(this);
-    connect(m_lspManager, &LspManager::completionsReady,
-            this, &Widget::onLspCompletionsReady);
-    connect(m_lspManager, &LspManager::diagnosticsReady,
-            this, &Widget::onLspDiagnosticsReady);
-    connect(m_lspManager, &LspManager::definitionReady,
+    // 7. 初始化 LSP 协调器（拥有 LspManager，下沉信号路由逻辑）
+    m_lspCoordinator = new LspCoordinator(this);
+    // 依赖注入：协调器需要 tabBar 查找编辑器、completer 注入补全候选
+    // 注：m_tabBar 和 m_completer 在后续步骤创建，此处先延迟到创建完成后注入
+    // UI 级响应信号 → Widget 处理（跳转/悬停/引用/大纲/错误）
+    connect(m_lspCoordinator, &LspCoordinator::definitionReady,
             this, &Widget::onLspDefinitionReady);
-    connect(m_lspManager, &LspManager::hoverReady,
+    connect(m_lspCoordinator, &LspCoordinator::hoverReady,
             this, &Widget::onLspHoverReady);
-    connect(m_lspManager, &LspManager::referencesReady,
+    connect(m_lspCoordinator, &LspCoordinator::referencesReady,
             this, &Widget::onLspReferencesReady);
-    connect(m_lspManager, &LspManager::symbolsReady,
+    connect(m_lspCoordinator, &LspCoordinator::symbolsReady,
             this, &Widget::onLspSymbolsReady);
-    connect(m_lspManager, &LspManager::serverError,
+    connect(m_lspCoordinator, &LspCoordinator::serverError,
             this, &Widget::onLspServerError);
     // LSP 服务器不可用时弹窗提示（仅提示一次，避免刷屏）
-    connect(m_lspManager, &LspManager::serverNotAvailable,
+    connect(m_lspCoordinator, &LspCoordinator::serverNotAvailable,
             this, [this](const QString& langId) {
                 static QSet<QString> warned;
                 if (warned.contains(langId)) return;
@@ -200,9 +199,9 @@ Widget::Widget(QWidget *parent)
                 // 侧边栏 onExplorerOpenFolder 已自行设置工作目录并刷新文件列表
                 // 此处统一处理 UI 状态：隐藏欢迎页、同步标题栏等
                 if (m_welcomePage) m_welcomePage->hide();
-                // P0-2: 同步工作区根目录到 LSP 管理器，使 clangd 使用正确的项目根目录
-                if (m_lspManager && m_sideBar) {
-                    m_lspManager->setWorkspaceRoot(m_sideBar->currentWorkDir());
+                // P0-2: 同步工作区根目录到 LSP 协调器，使 clangd 使用正确的项目根目录
+                if (m_lspCoordinator && m_sideBar) {
+                    m_lspCoordinator->setWorkspaceRoot(m_sideBar->currentWorkDir());
                 }
             });
 
@@ -351,6 +350,13 @@ void Widget::createUi()
 
     // 编辑器标签页栏
     m_tabBar = new EditorTabBar(this);
+
+    // 依赖注入：LspCoordinator 需要 tabBar 查找编辑器、completer 注入补全候选
+    // （m_lspCoordinator 在前序步骤已创建，此处补齐依赖）
+    m_lspCoordinator->setTabBar(m_tabBar);
+    if (auto* completerImpl = dynamic_cast<TextCompleter*>(m_completer)) {
+        m_lspCoordinator->setCompleter(completerImpl);
+    }
 
     // V1.9: 编辑器分栏分割器（m_tabBar | m_splitView）
     // 默认水平方向，m_splitView 隐藏时只显示 m_tabBar
@@ -913,24 +919,24 @@ void Widget::bindCurrentEditor(MyTextEdit* editor)
     // SettingsPage 也监听 configChanged 更新 SpinBox，实现双向联动
 
     // === LSP 信号连接（MyTextEdit → LspManager → LspClient）===
-    if (m_lspManager) {
+    if (m_lspCoordinator) {
         // 补全请求（Ctrl+Space 触发，MyTextEdit 发射信号带光标位置）
         connect(editor, &MyTextEdit::lspCompletionRequested,
                 this, [this](int line, int col) {
-            if (!m_lspManager || !m_tabBar) return;
+            if (!m_lspCoordinator || !m_tabBar) return;
             QString path = m_tabBar->currentFilePath();
             if (!path.isEmpty()) {
-                m_lspManager->requestCompletion(path, line, col);
+                m_lspCoordinator->requestCompletion(path, line, col);
             }
         }, Qt::UniqueConnection);
 
         // L16: 鼠标悬停请求（500ms 防抖，MyTextEdit 发射信号带光标位置）
         connect(editor, &MyTextEdit::lspHoverRequested,
                 this, [this](int line, int col) {
-            if (!m_lspManager || !m_tabBar) return;
+            if (!m_lspCoordinator || !m_tabBar) return;
             QString path = m_tabBar->currentFilePath();
-            if (!path.isEmpty() && m_lspManager->hasServerForFile(path)) {
-                m_lspManager->requestHover(path, line, col);
+            if (!path.isEmpty() && m_lspCoordinator->hasServerForFile(path)) {
+                m_lspCoordinator->requestHover(path, line, col);
             }
         }, Qt::UniqueConnection);
 
@@ -944,9 +950,9 @@ void Widget::bindCurrentEditor(MyTextEdit* editor)
         // 监听 QTextDocument::contentsChange 而非 MyTextEdit 信号，保持 MyTextEdit 不依赖 LSP
         connect(editor->document(), &QTextDocument::contentsChange,
                 this, [this, editor](int, int, int) {
-            if (!m_lspManager || !m_tabBar) return;
+            if (!m_lspCoordinator || !m_tabBar) return;
             QString path = m_tabBar->currentFilePath();
-            if (path.isEmpty() || !m_lspManager->hasServerForFile(path)) return;
+            if (path.isEmpty() || !m_lspCoordinator->hasServerForFile(path)) return;
 
             // 防抖：每个编辑器一个 QTimer，300ms 内只发送最后一次变更
             static QHash<MyTextEdit*, QTimer*> debounceTimers;
@@ -957,12 +963,12 @@ void Widget::bindCurrentEditor(MyTextEdit* editor)
                     if (!m_tabBar || !editor) return;
                     QString p = m_tabBar->currentFilePath();
                     if (!p.isEmpty()) {
-                        m_lspManager->documentChanged(p, editor->toPlainText());
+                        m_lspCoordinator->documentChanged(p, editor->toPlainText());
                         // L14: didChange 后延迟请求 documentSymbol，更新语义高亮
                         // 额外 200ms 延迟给服务器处理 didChange 的时间
                         QTimer::singleShot(200, this, [this, p]() {
-                            if (m_lspManager && m_lspManager->hasServerForFile(p)) {
-                                m_lspManager->requestSymbols(p);
+                            if (m_lspCoordinator && m_lspCoordinator->hasServerForFile(p)) {
+                                m_lspCoordinator->requestSymbols(p);
                             }
                         });
                     }
@@ -1177,8 +1183,8 @@ void Widget::saveCurrentFileDirect()
     if (m_gitPanel) m_gitPanel->refresh();
 
     // LSP：通知语言服务器文件已保存
-    if (m_lspManager && !currentPath.isEmpty()) {
-        m_lspManager->documentSaved(currentPath);
+    if (m_lspCoordinator && !currentPath.isEmpty()) {
+        m_lspCoordinator->documentSaved(currentPath);
     }
 
     // 自定义头文件符号高亮：保存后重新扫描（用户可能新增/删除了 #include/import）
@@ -1350,13 +1356,13 @@ void Widget::onFileOpenFromSidebar(const QString& filePath)
     });
 
     // LSP：文件打开时通知语言服务器（按 autoStart 配置决定是否启动）
-    if (m_lspManager && ConfigManager::instance().lspAutoStart()) {
-        m_lspManager->openFile(filePath, content);
+    if (m_lspCoordinator && ConfigManager::instance().lspAutoStart()) {
+        m_lspCoordinator->openFile(filePath, content);
         // L14: 延迟请求 documentSymbol — 服务器需要时间完成 initialize + didOpen 处理
         // 500ms 后请求语义符号，触发语义高亮
         QTimer::singleShot(500, this, [this, filePath]() {
-            if (m_lspManager && m_lspManager->hasServerForFile(filePath)) {
-                m_lspManager->requestSymbols(filePath);
+            if (m_lspCoordinator && m_lspCoordinator->hasServerForFile(filePath)) {
+                m_lspCoordinator->requestSymbols(filePath);
             }
         });
     }
@@ -1535,9 +1541,9 @@ void Widget::refreshOutlineForCurrentEditor()
     }
 
     // 若有 LSP 服务器，请求符号（结果通过 onLspSymbolsReady 异步返回）
-    if (m_lspManager && m_lspManager->hasServerForFile(filePath) &&
-        m_lspManager->isServerInitialized(filePath)) {
-        m_lspManager->requestSymbols(filePath);
+    if (m_lspCoordinator && m_lspCoordinator->hasServerForFile(filePath) &&
+        m_lspCoordinator->isServerInitialized(filePath)) {
+        m_lspCoordinator->requestSymbols(filePath);
         // 异步：onLspSymbolsReady 会调用 m_sideBar->updateOutline
     } else {
         // 无 LSP：使用离线正则扫描
@@ -1628,8 +1634,8 @@ void Widget::onAddFolderToWorkspace()
     if (m_sideBar && m_sideBar->addWorkspaceFolder(dir)) {
         LOG_INFO("[Widget] 已添加文件夹到工作区: " << dir.toStdString());
         // P0-2: 如果 LSP 尚未设置工作区根目录，用第一个文件夹初始化
-        if (m_lspManager && m_lspManager->workspaceRoot().isEmpty()) {
-            m_lspManager->setWorkspaceRoot(dir);
+        if (m_lspCoordinator && m_lspCoordinator->workspaceRoot().isEmpty()) {
+            m_lspCoordinator->setWorkspaceRoot(dir);
         }
     } else {
         ModernDialog::information(this, tr("添加文件夹"),
@@ -1947,8 +1953,8 @@ void Widget::onOpenFolderRequested()
         // 选择文件夹后隐藏欢迎页（与侧边栏按钮行为一致）
         if (m_welcomePage) m_welcomePage->hide();
         // P0-2: 同步工作区根目录到 LSP 管理器，使 clangd 使用正确的项目根目录
-        if (m_lspManager) {
-            m_lspManager->setWorkspaceRoot(dir);
+        if (m_lspCoordinator) {
+            m_lspCoordinator->setWorkspaceRoot(dir);
         }
     } else {
         LOG_WARN("[Widget] m_sideBar 为空，无法设置工作目录");
@@ -2248,59 +2254,7 @@ void Widget::onToLowerCase()
 }
 
 // ========== LSP 语言服务器响应槽 ==========
-
-void Widget::onLspCompletionsReady(const QString& filePath, const QList<LspCompletionItem>& items)
-{
-    // LSP 补全结果 → 注入 TextCompleter 候选列表（优先于本地词典显示）
-    LOG_DEBUG("[Widget] LSP 补全结果: " << items.size() << " 项, file=" << filePath.toStdString());
-
-    auto* completerImpl = dynamic_cast<TextCompleter*>(m_completer);
-    if (completerImpl) {
-        completerImpl->setLspCompletionItems(items);
-    }
-}
-
-void Widget::onLspDiagnosticsReady(const QString& filePath, const QList<LspDiagnostic>& diagnostics)
-{
-    // LSP 诊断 → 转换为编辑器覆盖层格式 → MyTextEdit::setDiagnostics
-    LOG_DEBUG("[Widget] LSP 诊断: " << diagnostics.size() << " 条, file=" << filePath.toStdString());
-
-    if (!m_tabBar) return;
-
-    // 类型转换：LspDiagnostic → LspDiagnosticOverlay
-    // 注意：枚举值不同（LspDiagnostic 从 0 开始，Overlay 从 1 开始）
-    QList<LspDiagnosticOverlay> overlays;
-    overlays.reserve(diagnostics.size());
-    for (const LspDiagnostic& d : diagnostics) {
-        LspDiagnosticOverlay o;
-        o.startLine = d.line;
-        o.startCol = d.column;
-        o.endLine = d.endLine;
-        o.endCol = d.endColumn;
-        // LspDiagnostic::Error=0 → Overlay::Error=1, Warning=1→2, Information=2→3, Hint=3→4
-        o.severity = static_cast<LspDiagnosticOverlay::Severity>(static_cast<int>(d.severity) + 1);
-        o.message = d.message;
-        if (!d.source.isEmpty())
-            o.message = QStringLiteral("[%1] %2").arg(d.source, d.message);
-        overlays.append(o);
-    }
-
-    // 修复 P2-1: 遍历所有打开的标签页，将诊断分发到匹配 filePath 的编辑器
-    // clangd 后台索引会推送非当前标签页的诊断，旧逻辑只更新当前标签页导致后台 tab 诊断丢失
-    int count = m_tabBar->tabCount();
-    for (int i = 0; i < count; ++i) {
-        const TabData* td = m_tabBar->tabDataAt(i);
-        if (!td || !td->editor) continue;
-        // 路径标准化比较（避免大小写/斜杠差异导致匹配失败）
-        if (QDir::toNativeSeparators(td->filePath) ==
-            QDir::toNativeSeparators(filePath)) {
-            td->editor->setDiagnostics(overlays);
-            return;  // 文件路径唯一，匹配到即返回
-        }
-    }
-
-    // 未找到匹配的标签页（可能是头文件等未打开的诊断推送），静默忽略
-}
+// 注：补全/诊断路由已下沉到 LspCoordinator，Widget 仅保留 UI 交互级响应
 
 void Widget::onLspDefinitionReady(const QString& filePath, const QString& uri, int line, int col)
 {
@@ -2461,23 +2415,11 @@ void Widget::onLspReferencesReady(const QString& filePath, const QList<QVariantM
 
 void Widget::onLspSymbolsReady(const QString& filePath, const QList<QVariantMap>& symbols)
 {
-    // L12-L14: LSP 文档符号 → 语义高亮
-    // 解析 documentSymbol 响应，将符号信息传递给当前编辑器的高亮器
-    LOG_DEBUG("[Widget] LSP 文档符号: " << symbols.size() << " 个, file=" << filePath.toStdString());
+    // LSP 文档符号 → 侧边大纲面板更新
+    // 注：编辑器语义高亮已由 LspCoordinator 内部路由处理，Widget 仅更新大纲
+    LOG_DEBUG("[Widget] LSP 文档符号（大纲更新）: " << symbols.size()
+              << " 个, file=" << filePath.toStdString());
 
-    // 只更新当前标签页对应的编辑器（如果文件路径匹配）
-    if (!m_tabBar) return;
-    QString currentPath = m_tabBar->currentFilePath();
-    if (currentPath != filePath) return;
-
-    MyTextEdit* ed = qobject_cast<MyTextEdit*>(
-        m_currentTextEdit ? m_currentTextEdit->asWidget() : nullptr);
-    if (!ed) return;
-
-    // 转发符号列表给编辑器 → CodeSyntaxHighlighter 解析并重高亮
-    ed->setSemanticSymbols(symbols);
-
-    // V1.9: 同时更新侧边大纲面板
     if (m_sideBar) {
         m_sideBar->updateOutline(filePath, symbols);
     }
@@ -2496,10 +2438,10 @@ void Widget::onLspServerError(const QString& filePath, const QString& error)
 void Widget::onLspGotoDefinition()
 {
     // F12 跳转定义 — 获取光标位置，请求 LSP definition
-    if (!m_lspManager || !m_tabBar) return;
+    if (!m_lspCoordinator || !m_tabBar) return;
 
     QString path = m_tabBar->currentFilePath();
-    if (path.isEmpty() || !m_lspManager->hasServerForFile(path)) {
+    if (path.isEmpty() || !m_lspCoordinator->hasServerForFile(path)) {
         LOG_DEBUG("[Widget] F12 跳转定义: 当前文件无 LSP 服务器");
         return;
     }
@@ -2511,16 +2453,16 @@ void Widget::onLspGotoDefinition()
     // LSP 行列从 0 开始，编辑器从 1 开始
     int line = ed->currentLine() - 1;
     int col = ed->currentColumn() - 1;
-    m_lspManager->requestDefinition(path, line, col);
+    m_lspCoordinator->requestDefinition(path, line, col);
 }
 
 void Widget::onLspFindReferences()
 {
     // Shift+F12 查找引用 — 获取光标位置，请求 LSP references
-    if (!m_lspManager || !m_tabBar) return;
+    if (!m_lspCoordinator || !m_tabBar) return;
 
     QString path = m_tabBar->currentFilePath();
-    if (path.isEmpty() || !m_lspManager->hasServerForFile(path)) {
+    if (path.isEmpty() || !m_lspCoordinator->hasServerForFile(path)) {
         LOG_DEBUG("[Widget] Shift+F12 查找引用: 当前文件无 LSP 服务器");
         return;
     }
@@ -2531,7 +2473,7 @@ void Widget::onLspFindReferences()
 
     int line = ed->currentLine() - 1;
     int col = ed->currentColumn() - 1;
-    m_lspManager->requestReferences(path, line, col);
+    m_lspCoordinator->requestReferences(path, line, col);
 }
 
 // ========== M5: Diff 视图 ==========
