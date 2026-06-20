@@ -77,6 +77,7 @@ set(SOURCES
     src/ui/sidebar/GitPanel.cpp               # 源代码管理面板 UI
     src/ui/sidebar/OutlinePanel.cpp           # 大纲面板（LSP符号/离线正则扫描）
     src/ui/sidebar/TasksPanel.cpp             # 任务面板（任务树/输出/运行停止）
+    src/ui/sidebar/SearchPanel.cpp            # 搜索面板（文本/正则/符号搜索+全局替换）
 
     # ===== ui/terminal/ 终端层 =====
     src/ui/terminal/EmbeddedTerminal.cpp      # 内嵌终端容器（ITerminalWidget实现）

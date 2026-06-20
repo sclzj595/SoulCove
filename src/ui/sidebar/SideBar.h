@@ -25,6 +25,7 @@ class GitPanel;
 class TaskManager;  // M15: 任务管理器（前向声明）
 class OutlinePanel;  // V1.9: 大纲面板（已抽出）
 class TasksPanel;    // M15: 任务面板（已抽出）
+class SearchPanel;   // 搜索面板（已抽出）
 class QDropEvent;   // V1.9: 文件树拖拽
 
 /// @brief VSCode风格左侧资源栏组件
@@ -148,8 +149,6 @@ private slots:
     void onFileItemDoubleClicked(QTreeWidgetItem* item, int column);
     void onFileItemClicked(QTreeWidgetItem* item, int column);
     void onFileContextMenu(const QPoint& pos);
-    void onSearchTriggered();
-    void onSearchResultDoubleClicked(QListWidgetItem* item);
     void onExplorerNewFile();
     void onExplorerRefresh();
     void onExplorerCollapseAll();
@@ -173,28 +172,6 @@ private:
 
     /// @brief 在树中递归查找匹配路径的项
     QTreeWidgetItem* findTreeItemByPath(QTreeWidgetItem* parent, const QString& filePath) const;
-
-    /// @brief 递归搜索文件内容
-    void searchInDirectory(const QDir& dir, const QString& keyword);
-
-    /// @brief V1.9: 全局替换（在所有匹配文件中替换）
-    void onSearchReplaceAll();
-
-    /// @brief V1.9: 检查文件是否匹配文件类型过滤器
-    bool matchesFileFilter(const QString& fileName) const;
-
-    /// @brief V1.9: 全局符号搜索 — 遍历工作区文件，正则扫描符号定义
-    /// @param keyword 符号名关键字（空则返回所有符号）
-    void performSymbolSearch(const QString& keyword);
-
-    /// @brief V1.9: 扫描单个文件的符号定义（正则匹配）
-    /// @return 符号列表，每项为 (符号名, 行号, 符号类型图标)
-    struct SymbolEntry {
-        QString name;
-        int line;
-        QString icon;
-    };
-    QList<SymbolEntry> scanFileSymbols(const QString& filePath) const;
 
     /// @brief V1.9: 处理文件树拖拽事件（eventFilter 方式）
     bool handleTreeDropEvent(QDropEvent* event);
@@ -226,16 +203,8 @@ private:
     QPushButton*   m_btnCollapseAll;     // 折叠全部按钮
     QTreeWidget*   m_fileTree;           // 文件树（替代原QListWidget）
 
-    // === Search 面板 ===
-    QWidget*       m_searchPanel;
-    QLineEdit*     m_searchInput;
-    QLineEdit*     m_replaceInput = nullptr;      // 替换输入框（V1.9）
-    QLineEdit*     m_fileFilterInput = nullptr;   // 文件类型过滤（V1.9）
-    QListWidget*   m_searchResults;
-    QCheckBox*     m_chkCaseSensitive = nullptr;  // 大小写敏感（V1.9）
-    QCheckBox*     m_chkRegex = nullptr;          // 正则表达式（V1.9）
-    QCheckBox*     m_chkSymbolSearch = nullptr;   // V1.9: 符号搜索模式（全局符号搜索）
-    QPushButton*   m_btnReplaceAll = nullptr;     // 全部替换按钮（V1.9）
+    // === Search 面板（已抽出为 SearchPanel）===
+    SearchPanel*   m_searchPanel = nullptr;  // 搜索面板（拥有 input/results/options）
 
     // === Git 面板 ===
     QWidget*       m_gitPanel;

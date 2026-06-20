@@ -3,6 +3,7 @@
 #include "ui/sidebar/GitPanel.h"
 #include "ui/sidebar/OutlinePanel.h"  // V1.9: 大纲面板（已抽出）
 #include "ui/sidebar/TasksPanel.h"    // M15: 任务面板（已抽出）
+#include "ui/sidebar/SearchPanel.h"   // 搜索面板（已抽出）
 
 #include <QDir>
 #include <QDirIterator>
@@ -162,55 +163,16 @@ SideBar::SideBar(QWidget* parent)
 
     m_panelStack->addWidget(m_explorerPanel);
 
-    // --- Search 面板 ---
-    m_searchPanel = new QWidget();
-    auto* searchLayout = new QVBoxLayout(m_searchPanel);
-    searchLayout->setContentsMargins(8, 8, 4, 4);
-    searchLayout->setSpacing(4);
-
-    auto* searchTitle = new QLabel(tr("搜索"), m_searchPanel);
-    searchTitle->setObjectName(QStringLiteral("panelTitle"));
-    searchLayout->addWidget(searchTitle);
-
-    m_searchInput = new QLineEdit(m_searchPanel);
-    m_searchInput->setPlaceholderText(tr("搜索内容..."));
-    m_searchInput->setObjectName(QStringLiteral("searchInput"));
-    searchLayout->addWidget(m_searchInput);
-
-    // 替换输入框（V1.9）
-    m_replaceInput = new QLineEdit(m_searchPanel);
-    m_replaceInput->setPlaceholderText(tr("替换为..."));
-    m_replaceInput->setObjectName(QStringLiteral("replaceInput"));
-    searchLayout->addWidget(m_replaceInput);
-
-    // 选项行：大小写/正则 + 全部替换按钮
-    auto* optLayout = new QHBoxLayout();
-    optLayout->setSpacing(4);
-    m_chkCaseSensitive = new QCheckBox(tr("Aa"), m_searchPanel);
-    m_chkCaseSensitive->setToolTip(tr("区分大小写"));
-    m_chkRegex = new QCheckBox(tr(".*"), m_searchPanel);
-    m_chkRegex->setToolTip(tr("正则表达式"));
-    m_chkSymbolSearch = new QCheckBox(tr("§"), m_searchPanel);  // V1.9: 符号搜索
-    m_chkSymbolSearch->setToolTip(tr("符号搜索模式（全局搜索 class/function/struct 等符号定义）"));
-    m_btnReplaceAll = new QPushButton(tr("全部替换"), m_searchPanel);
-    m_btnReplaceAll->setToolTip(tr("在所有文件中替换"));
-    optLayout->addWidget(m_chkCaseSensitive);
-    optLayout->addWidget(m_chkRegex);
-    optLayout->addWidget(m_chkSymbolSearch);
-    optLayout->addStretch();
-    optLayout->addWidget(m_btnReplaceAll);
-    searchLayout->addLayout(optLayout);
-
-    // 文件类型过滤（V1.9）
-    m_fileFilterInput = new QLineEdit(m_searchPanel);
-    m_fileFilterInput->setPlaceholderText(tr("文件类型: *.cpp,*.h"));
-    m_fileFilterInput->setObjectName(QStringLiteral("fileFilterInput"));
-    searchLayout->addWidget(m_fileFilterInput);
-
-    m_searchResults = new QListWidget(m_searchPanel);
-    m_searchResults->setObjectName(QStringLiteral("sideFileList"));
-    searchLayout->addWidget(m_searchResults);
-
+    // --- Search 面板（已抽出为 SearchPanel）---
+    m_searchPanel = new SearchPanel(this);
+    // 转发搜索面板的信号到 SideBar 的信号（供 Widget 连接）
+    connect(m_searchPanel, &SearchPanel::fileOpenRequested,
+            this, &SideBar::fileOpenRequested);
+    connect(m_searchPanel, &SearchPanel::locateRequested,
+            this, [this](const QString& filePath, int line, int col) {
+        // 搜索结果的定位复用 outlineSymbolClicked 信号（Widget 层已连接跳转逻辑）
+        emit outlineSymbolClicked(filePath, line, col);
+    });
     m_panelStack->addWidget(m_searchPanel);
 
     // --- Git 面板（源代码管理）---
@@ -275,14 +237,8 @@ SideBar::SideBar(QWidget* parent)
     connect(m_fileTree, &QTreeWidget::customContextMenuRequested,
             this, &SideBar::onFileContextMenu);
 
-    // 搜索功能
-    connect(m_searchInput, &QLineEdit::returnPressed,
-            this, &SideBar::onSearchTriggered);
-    connect(m_searchResults, &QListWidget::itemDoubleClicked,
-            this, &SideBar::onSearchResultDoubleClicked);
-    // V1.9: 全部替换按钮
-    connect(m_btnReplaceAll, &QPushButton::clicked,
-            this, [this]() { onSearchReplaceAll(); });
+    // 注：Search 面板的信号连接由 SearchPanel 内部处理，
+    //     SideBar 构造时已转发 fileOpenRequested/locateRequested 信号
 
     // Explorer 工具栏按钮
     connect(m_btnNewFile, &QPushButton::clicked,
@@ -449,6 +405,7 @@ void SideBar::setWorkDirectory(const QString& dirPath)
     }
     m_workDir = dirPath;
     if (m_tasksPanel) m_tasksPanel->setWorkDirectory(m_workDir);
+    if (m_searchPanel) m_searchPanel->setWorkspaceFolders(m_workspaceFolders);
     refreshFileList();
     emit workspaceFoldersChanged(m_workspaceFolders);
 }
@@ -469,6 +426,7 @@ bool SideBar::addWorkspaceFolder(const QString& dirPath)
         m_workDir = absPath;
         if (m_tasksPanel) m_tasksPanel->setWorkDirectory(m_workDir);
     }
+    if (m_searchPanel) m_searchPanel->setWorkspaceFolders(m_workspaceFolders);
     refreshFileList();
     emit workspaceFoldersChanged(m_workspaceFolders);
     return true;
@@ -495,6 +453,7 @@ void SideBar::clearWorkspace()
     m_workspaceFolders.clear();
     m_workDir.clear();
     if (m_tasksPanel) m_tasksPanel->setWorkDirectory(m_workDir);
+    if (m_searchPanel) m_searchPanel->setWorkspaceFolders(m_workspaceFolders);
     refreshFileList();
     emit workspaceFoldersChanged(m_workspaceFolders);
 }
@@ -733,357 +692,6 @@ void SideBar::onFileContextMenu(const QPoint& pos)
     connect(actRefresh, &QAction::triggered, this, &SideBar::refreshFileList);
 
     menu.exec(m_fileTree->mapToGlobal(pos));
-}
-
-void SideBar::onSearchTriggered()
-{
-    QString keyword = m_searchInput->text().trimmed();
-    m_searchResults->clear();
-
-    if (keyword.isEmpty() && !(m_chkSymbolSearch && m_chkSymbolSearch->isChecked())) return;
-
-    // V1.9: 符号搜索模式
-    if (m_chkSymbolSearch && m_chkSymbolSearch->isChecked()) {
-        performSymbolSearch(keyword);
-        return;
-    }
-
-    // V1.9: 遍历工作区所有文件夹
-    if (m_workspaceFolders.isEmpty()) {
-        // 无工作区时使用默认 Files 目录
-        QString filesDir = QCoreApplication::applicationDirPath() + QStringLiteral("/Files");
-        QDir dir(filesDir);
-        if (!dir.exists()) dir.mkpath(filesDir);
-        searchInDirectory(dir, keyword);
-    } else {
-        for (const QString& folder : m_workspaceFolders) {
-            QDir dir(folder);
-            if (dir.exists()) {
-                searchInDirectory(dir, keyword);
-            }
-        }
-    }
-
-    if (m_searchResults->count() == 0) {
-        m_searchResults->addItem(tr("未找到匹配结果"));
-    }
-}
-
-void SideBar::searchInDirectory(const QDir& dir, const QString& keyword)
-{
-    // 递归子目录
-    QFileInfoList dirEntries = dir.entryInfoList(
-        QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
-    for (const QFileInfo& fi : dirEntries) {
-        searchInDirectory(QDir(fi.absoluteFilePath()), keyword);
-    }
-
-    // 准备正则表达式（如果启用）
-    QRegularExpression regex;
-    if (m_chkRegex && m_chkRegex->isChecked()) {
-        regex.setPattern(keyword);
-        if (!m_chkCaseSensitive || !m_chkCaseSensitive->isChecked()) {
-            regex.setPatternOptions(QRegularExpression::CaseInsensitiveOption);
-        }
-        if (!regex.isValid()) return;
-    }
-
-    Qt::CaseSensitivity cs = (m_chkCaseSensitive && m_chkCaseSensitive->isChecked()) ?
-        Qt::CaseSensitive : Qt::CaseInsensitive;
-
-    // 搜索文件内容
-    QFileInfoList fileEntries = dir.entryInfoList(
-        QDir::Files | QDir::NoDotAndDotDot, QDir::Name);
-    for (const QFileInfo& fi : fileEntries) {
-        // 跳过二进制文件
-        QString suffix = fi.suffix().toLower();
-        if (suffix == QStringLiteral("exe") || suffix == QStringLiteral("dll") ||
-            suffix == QStringLiteral("png") || suffix == QStringLiteral("jpg") ||
-            suffix == QStringLiteral("ico") || suffix == QStringLiteral("zip"))
-            continue;
-
-        // V1.9: 文件类型过滤
-        if (!matchesFileFilter(fi.fileName())) continue;
-
-        QFile file(fi.absoluteFilePath());
-        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
-
-        QTextStream in(&file);
-        int lineNum = 0;
-        while (!in.atEnd()) {
-            ++lineNum;
-            QString line = in.readLine();
-            bool matched = false;
-            if (m_chkRegex && m_chkRegex->isChecked()) {
-                matched = regex.match(line).hasMatch();
-            } else {
-                matched = line.contains(keyword, cs);
-            }
-            if (matched) {
-                QString display = QStringLiteral("%1:%2  %3")
-                    .arg(fi.fileName())
-                    .arg(lineNum)
-                    .arg(line.trimmed().left(60));
-                auto* item = new QListWidgetItem(display, m_searchResults);
-                item->setData(Qt::UserRole, fi.absoluteFilePath());
-                item->setData(Qt::UserRole + 1, lineNum - 1);  // 转为 0-based
-                item->setData(Qt::UserRole + 2, QStringLiteral("text"));  // 标记为文本搜索
-                item->setToolTip(fi.absoluteFilePath() + QStringLiteral(":") + QString::number(lineNum));
-            }
-        }
-        file.close();
-    }
-}
-
-bool SideBar::matchesFileFilter(const QString& fileName) const
-{
-    if (!m_fileFilterInput || m_fileFilterInput->text().trimmed().isEmpty())
-        return true;  // 无过滤条件，匹配所有
-
-    QString filterText = m_fileFilterInput->text().trimmed();
-    // 支持逗号分隔的多个模式：*.cpp,*.h,*.py
-    QStringList patterns = filterText.split(QStringLiteral(","),
-        Qt::SkipEmptyParts);
-
-    for (const QString& pattern : patterns) {
-        QString p = pattern.trimmed();
-        QRegularExpression re(
-            QRegularExpression::wildcardToRegularExpression(p),
-            QRegularExpression::CaseInsensitiveOption);
-        if (re.match(fileName).hasMatch()) return true;
-    }
-    return false;
-}
-
-void SideBar::onSearchReplaceAll()
-{
-    QString keyword = m_searchInput->text().trimmed();
-    QString replacement = m_replaceInput ? m_replaceInput->text() : QString();
-
-    if (keyword.isEmpty()) return;
-
-    int totalReplaced = 0;
-    int fileCount = 0;
-
-    // V1.9: 遍历工作区所有文件夹
-    QStringList searchDirs = m_workspaceFolders.isEmpty() ?
-        QStringList{QCoreApplication::applicationDirPath() + QStringLiteral("/Files")} :
-        m_workspaceFolders;
-
-    QRegularExpression regex;
-    if (m_chkRegex && m_chkRegex->isChecked()) {
-        regex.setPattern(keyword);
-        if (!m_chkCaseSensitive || !m_chkCaseSensitive->isChecked()) {
-            regex.setPatternOptions(QRegularExpression::CaseInsensitiveOption);
-        }
-        if (!regex.isValid()) return;
-    }
-
-    Qt::CaseSensitivity cs = (m_chkCaseSensitive && m_chkCaseSensitive->isChecked()) ?
-        Qt::CaseSensitive : Qt::CaseInsensitive;
-
-    for (const QString& searchDir : searchDirs) {
-        QDir dir(searchDir);
-        if (!dir.exists()) continue;
-
-        QDirIterator it(searchDir, QDir::Files | QDir::NoDotAndDotDot,
-                        QDirIterator::Subdirectories);
-
-        while (it.hasNext()) {
-            QString filePath = it.next();
-            QFileInfo fi(filePath);
-            QString suffix = fi.suffix().toLower();
-            if (suffix == QStringLiteral("exe") || suffix == QStringLiteral("dll") ||
-                suffix == QStringLiteral("png") || suffix == QStringLiteral("jpg") ||
-                suffix == QStringLiteral("ico") || suffix == QStringLiteral("zip"))
-                continue;
-
-            if (!matchesFileFilter(fi.fileName())) continue;
-
-            QFile file(filePath);
-            if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
-            QTextStream in(&file);
-            QString content = in.readAll();
-            file.close();
-
-            QString newContent = content;
-            int replaced = 0;
-
-            if (m_chkRegex && m_chkRegex->isChecked()) {
-                int offset = 0;
-                QRegularExpressionMatch match;
-                while ((match = regex.match(newContent, offset)).hasMatch()) {
-                    newContent.replace(match.capturedStart(), match.capturedLength(), replacement);
-                    offset = match.capturedStart() + replacement.length();
-                    replaced++;
-                }
-            } else {
-                int idx = 0;
-                while ((idx = newContent.indexOf(keyword, idx, cs)) >= 0) {
-                    newContent.replace(idx, keyword.length(), replacement);
-                    idx += replacement.length();
-                    replaced++;
-                }
-            }
-
-            if (replaced > 0) {
-                if (file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
-                    QTextStream out(&file);
-                    out << newContent;
-                    file.close();
-                    totalReplaced += replaced;
-                    fileCount++;
-                }
-            }
-        }
-    }
-
-    m_searchResults->clear();
-    m_searchResults->addItem(tr("已替换 %1 处，涉及 %2 个文件")
-        .arg(totalReplaced).arg(fileCount));
-
-    if (!keyword.isEmpty()) {
-        onSearchTriggered();
-    }
-}
-
-QList<SideBar::SymbolEntry> SideBar::scanFileSymbols(const QString& filePath) const
-{
-    // V1.9: 正则扫描单个文件的符号定义
-    QList<SymbolEntry> result;
-
-    QFileInfo fi(filePath);
-    QString suffix = fi.suffix().toLower();
-
-    QRegularExpression re;
-    if (suffix == QStringLiteral("py")) {
-        re.setPattern(QStringLiteral("^(\\s*)(class|def)\\s+(\\w+)"));
-    } else if (suffix == QStringLiteral("js") || suffix == QStringLiteral("ts")) {
-        re.setPattern(QStringLiteral("^(\\s*)(function|class|const|let|var)\\s+(\\w+)"));
-    } else if (suffix == QStringLiteral("cpp") || suffix == QStringLiteral("h") ||
-               suffix == QStringLiteral("hpp") || suffix == QStringLiteral("cc") ||
-               suffix == QStringLiteral("cxx") || suffix == QStringLiteral("c")) {
-        re.setPattern(QStringLiteral("^(\\s*)(class|struct|enum|namespace|void|int|bool|double|float|QString|auto|inline|static)\\s+(\\w+)"));
-    } else if (suffix == QStringLiteral("md")) {
-        re.setPattern(QStringLiteral("^(#{1,6})\\s+(.+)$"));
-    } else {
-        return result;  // 不支持的类型
-    }
-
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return result;
-    QTextStream in(&file);
-    QStringList lines = in.readAll().split(QLatin1Char('\n'));
-    file.close();
-
-    for (int i = 0; i < lines.size(); ++i) {
-        auto m = re.match(lines[i]);
-        if (m.hasMatch()) {
-            QString keyword = m.captured(2);
-            QString name = m.captured(3);
-            QString icon = QStringLiteral("•");
-
-            if (keyword == QStringLiteral("class") || keyword == QStringLiteral("struct"))
-                icon = QStringLiteral("C");
-            else if (keyword == QStringLiteral("def") || keyword == QStringLiteral("function"))
-                icon = QStringLiteral("f");
-            else if (keyword == QStringLiteral("enum"))
-                icon = QStringLiteral("E");
-            else if (keyword == QStringLiteral("namespace"))
-                icon = QStringLiteral("N");
-
-            result.append({name, i, icon});
-        }
-    }
-
-    return result;
-}
-
-void SideBar::performSymbolSearch(const QString& keyword)
-{
-    // V1.9: 全局符号搜索 — 遍历工作区所有文件，扫描符号定义
-    m_searchResults->clear();
-
-    QStringList searchDirs = m_workspaceFolders.isEmpty() ?
-        QStringList{QCoreApplication::applicationDirPath() + QStringLiteral("/Files")} :
-        m_workspaceFolders;
-
-    Qt::CaseSensitivity cs = (m_chkCaseSensitive && m_chkCaseSensitive->isChecked()) ?
-        Qt::CaseSensitive : Qt::CaseInsensitive;
-
-    int totalFound = 0;
-
-    for (const QString& searchDir : searchDirs) {
-        QDirIterator it(searchDir, QDir::Files | QDir::NoDotAndDotDot,
-                        QDirIterator::Subdirectories);
-
-        while (it.hasNext()) {
-            QString filePath = it.next();
-            QFileInfo fi(filePath);
-            QString suffix = fi.suffix().toLower();
-
-            // 跳过二进制文件
-            if (suffix == QStringLiteral("exe") || suffix == QStringLiteral("dll") ||
-                suffix == QStringLiteral("png") || suffix == QStringLiteral("jpg") ||
-                suffix == QStringLiteral("ico") || suffix == QStringLiteral("zip"))
-                continue;
-
-            if (!matchesFileFilter(fi.fileName())) continue;
-
-            // 扫描符号
-            auto symbols = scanFileSymbols(filePath);
-            for (const auto& sym : symbols) {
-                // 匹配符号名
-                bool match = keyword.isEmpty() ||
-                    sym.name.contains(keyword, cs);
-                if (!match) continue;
-
-                // 添加到结果列表
-                QString displayText = QStringLiteral("%1 %2  —  %3:%4")
-                    .arg(sym.icon, sym.name, fi.fileName())
-                    .arg(sym.line + 1);
-
-                auto* item = new QListWidgetItem(displayText, m_searchResults);
-                item->setToolTip(filePath);
-                // 存储跳转信息：UserRole=filePath, UserRole+1=line(0-based), UserRole+2=类型
-                item->setData(Qt::UserRole, filePath);
-                item->setData(Qt::UserRole + 1, sym.line);
-                item->setData(Qt::UserRole + 2, QStringLiteral("symbol"));  // 标记为符号搜索
-                totalFound++;
-
-                if (totalFound >= 500) {
-                    m_searchResults->addItem(tr("... 结果过多，仅显示前 500 项"));
-                    return;
-                }
-            }
-        }
-    }
-
-    if (totalFound == 0) {
-        m_searchResults->addItem(tr("未找到匹配符号"));
-    } else {
-        LOG_DEBUG("[SideBar] 符号搜索完成: " << totalFound << " 个结果");
-    }
-}
-
-void SideBar::onSearchResultDoubleClicked(QListWidgetItem* item)
-{
-    if (!item) return;
-    QString filePath = item->data(Qt::UserRole).toString();
-    if (filePath.isEmpty()) return;
-
-    // V1.9: 统一跳转逻辑 — 打开文件并跳转到指定行
-    int line = item->data(Qt::UserRole + 1).toInt();  // 0-based
-    QString resultType = item->data(Qt::UserRole + 2).toString();
-
-    if (resultType == QStringLiteral("symbol") || resultType == QStringLiteral("text")) {
-        // 符号搜索或文本搜索结果：打开文件并跳转到行
-        emit fileOpenRequested(filePath);
-        emit outlineSymbolClicked(filePath, line, 0);
-    } else {
-        // 兼容旧结果（无类型标记）：仅打开文件
-        emit fileOpenRequested(filePath);
-    }
 }
 
 // ============================================================
