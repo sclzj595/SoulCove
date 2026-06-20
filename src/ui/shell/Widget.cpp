@@ -55,9 +55,9 @@
 
 // ========== 构造 / 析构 ==========
 
-Widget::Widget(QWidget *parent)
+Widget::Widget(const ProductConfig& config, QWidget *parent)
     : FramelessWindow(parent), m_currentTextEdit(nullptr),
-      m_settingsPage(nullptr)
+      m_settingsPage(nullptr), m_productConfig(config)
 {
     // 0. 安装屏幕安全守卫 — 防止跨屏/高DPI时GDI崩溃
     auto* screenGuard = new ScreenGuard(this);
@@ -103,16 +103,13 @@ Widget::Widget(QWidget *parent)
     // 5. 提前创建补全器（解决时序问题：文件加载时文本变更信号早于懒加载）
     m_currentTextEdit = nullptr;
     auto& cfg = ConfigManager::instance();
-    if (cfg.showCompletion()) {
+    if (m_productConfig.completion && cfg.showCompletion()) {
         auto* completerImpl = new TextCompleter(this);
         completerImpl->setWindowFlags(completerImpl->windowFlags() | Qt::WindowStaysOnTopHint);
         m_completer = completerImpl;
     } else {
         m_completer = nullptr;
     }
-
-    // 5.5 获取配置引用（后续自动保存等需要用到）
-    auto& config = ConfigManager::instance();
 
     // 5.6 连接标签页信号
     connect(m_tabBar, &EditorTabBar::currentEditorChanged,
@@ -140,73 +137,78 @@ Widget::Widget(QWidget *parent)
     });
 
     // 7. 初始化 LSP 协调器（拥有 LspManager，下沉信号路由逻辑）
-    m_lspCoordinator = new LspCoordinator(this);
-    // 依赖注入：协调器需要 tabBar 查找编辑器、completer 注入补全候选
-    // 注：m_tabBar 和 m_completer 在后续步骤创建，此处先延迟到创建完成后注入
-    // UI 级响应信号 → Widget 处理（跳转/悬停/引用/大纲/错误）
-    connect(m_lspCoordinator, &LspCoordinator::definitionReady,
-            this, &Widget::onLspDefinitionReady);
-    connect(m_lspCoordinator, &LspCoordinator::hoverReady,
-            this, &Widget::onLspHoverReady);
-    connect(m_lspCoordinator, &LspCoordinator::referencesReady,
-            this, &Widget::onLspReferencesReady);
-    connect(m_lspCoordinator, &LspCoordinator::symbolsReady,
-            this, &Widget::onLspSymbolsReady);
-    connect(m_lspCoordinator, &LspCoordinator::serverError,
-            this, &Widget::onLspServerError);
-    // LSP 服务器不可用时弹窗提示（仅提示一次，避免刷屏）
-    connect(m_lspCoordinator, &LspCoordinator::serverNotAvailable,
-            this, [this](const QString& langId) {
-                static QSet<QString> warned;
-                if (warned.contains(langId)) return;
-                warned.insert(langId);
-                QString msg = tr("未检测到 %1 语言服务器，LSP 智能功能（跳转定义/"
-                                 "悬停提示/查找引用）将不可用。\n\n"
-                                 "请前往「设置 → LSP」手动配置服务器路径，"
-                                 "或安装对应语言服务器（如 clangd）后重启。").arg(langId);
-                ModernDialog::information(this, tr("LSP 不可用"), msg);
-            });
+    //    根据产品线配置条件化创建 — notebook/editor 不需要 LSP
+    if (m_productConfig.lsp) {
+        m_lspCoordinator = new LspCoordinator(this);
+        // 依赖注入：协调器需要 tabBar 查找编辑器、completer 注入补全候选
+        // 注：m_tabBar 和 m_completer 在后续步骤创建，此处先延迟到创建完成后注入
+        // UI 级响应信号 → Widget 处理（跳转/悬停/引用/大纲/错误）
+        connect(m_lspCoordinator, &LspCoordinator::definitionReady,
+                this, &Widget::onLspDefinitionReady);
+        connect(m_lspCoordinator, &LspCoordinator::hoverReady,
+                this, &Widget::onLspHoverReady);
+        connect(m_lspCoordinator, &LspCoordinator::referencesReady,
+                this, &Widget::onLspReferencesReady);
+        connect(m_lspCoordinator, &LspCoordinator::symbolsReady,
+                this, &Widget::onLspSymbolsReady);
+        connect(m_lspCoordinator, &LspCoordinator::serverError,
+                this, &Widget::onLspServerError);
+        // LSP 服务器不可用时弹窗提示（仅提示一次，避免刷屏）
+        connect(m_lspCoordinator, &LspCoordinator::serverNotAvailable,
+                this, [this](const QString& langId) {
+                    static QSet<QString> warned;
+                    if (warned.contains(langId)) return;
+                    warned.insert(langId);
+                    QString msg = tr("未检测到 %1 语言服务器，LSP 智能功能（跳转定义/"
+                                     "悬停提示/查找引用）将不可用。\n\n"
+                                     "请前往「设置 → LSP」手动配置服务器路径，"
+                                     "或安装对应语言服务器（如 clangd）后重启。").arg(langId);
+                    ModernDialog::information(this, tr("LSP 不可用"), msg);
+                });
+    }
 
-    // 8. 侧边栏文件双击打开
-    connect(m_sideBar, &SideBar::fileOpenRequested,
-            this, &Widget::onFileOpenFromSidebar);
-    connect(m_sideBar, &SideBar::fileCreateRequested,
-            this, &Widget::onSidebarCreateFile);
-    connect(m_sideBar, &SideBar::fileDeleteRequested,
-            this, &Widget::onSidebarDeleteFile);
-    connect(m_sideBar, &SideBar::fileRenameRequested,
-            this, &Widget::onSidebarRenameFile);
-    connect(m_sideBar, &SideBar::openInFolderRequested,
-            this, &Widget::onSidebarOpenInFolder);
-    // V1.9: 新建文件夹 + 拖拽移动
-    connect(m_sideBar, &SideBar::folderCreateRequested,
-            this, &Widget::onSidebarCreateFolder);
-    connect(m_sideBar, &SideBar::fileMoveRequested,
-            this, &Widget::onSidebarMoveFile);
-    // V1.9: 大纲符号跳转
-    connect(m_sideBar, &SideBar::outlineSymbolClicked,
-            this, &Widget::onOutlineSymbolClicked);
-    // V1.9: 添加文件夹到工作区
-    connect(m_sideBar, &SideBar::addFolderToWorkspaceRequested,
-            this, &Widget::onAddFolderToWorkspace);
-    // 侧边栏终端按钮 → 切换终端面板
-    connect(m_sideBar, &SideBar::terminalToggleRequested,
-            this, &Widget::onToggleTerminal);
-    // 侧边栏「打开文件夹」按钮 → 统一走 Widget 槽（修复孤儿信号）
-    connect(m_sideBar, &SideBar::openFolderRequested,
-            this, [this]() {
-                LOG_INFO("[Widget] 侧边栏 openFolderRequested 信号已接收");
-                // 侧边栏 onExplorerOpenFolder 已自行设置工作目录并刷新文件列表
-                // 此处统一处理 UI 状态：隐藏欢迎页、同步标题栏等
-                if (m_welcomePage) m_welcomePage->hide();
-                // P0-2: 同步工作区根目录到 LSP 协调器，使 clangd 使用正确的项目根目录
-                if (m_lspCoordinator && m_sideBar) {
-                    m_lspCoordinator->setWorkspaceRoot(m_sideBar->currentWorkDir());
-                }
-            });
+    // 8. 侧边栏信号连接（根据产品线配置条件化 — notebook 无侧边栏）
+    if (m_sideBar) {
+        connect(m_sideBar, &SideBar::fileOpenRequested,
+                this, &Widget::onFileOpenFromSidebar);
+        connect(m_sideBar, &SideBar::fileCreateRequested,
+                this, &Widget::onSidebarCreateFile);
+        connect(m_sideBar, &SideBar::fileDeleteRequested,
+                this, &Widget::onSidebarDeleteFile);
+        connect(m_sideBar, &SideBar::fileRenameRequested,
+                this, &Widget::onSidebarRenameFile);
+        connect(m_sideBar, &SideBar::openInFolderRequested,
+                this, &Widget::onSidebarOpenInFolder);
+        // V1.9: 新建文件夹 + 拖拽移动
+        connect(m_sideBar, &SideBar::folderCreateRequested,
+                this, &Widget::onSidebarCreateFolder);
+        connect(m_sideBar, &SideBar::fileMoveRequested,
+                this, &Widget::onSidebarMoveFile);
+        // V1.9: 大纲符号跳转
+        connect(m_sideBar, &SideBar::outlineSymbolClicked,
+                this, &Widget::onOutlineSymbolClicked);
+        // V1.9: 添加文件夹到工作区
+        connect(m_sideBar, &SideBar::addFolderToWorkspaceRequested,
+                this, &Widget::onAddFolderToWorkspace);
+        // 侧边栏终端按钮 → 切换终端面板
+        connect(m_sideBar, &SideBar::terminalToggleRequested,
+                this, &Widget::onToggleTerminal);
+        // 侧边栏「打开文件夹」按钮 → 统一走 Widget 槽（修复孤儿信号）
+        connect(m_sideBar, &SideBar::openFolderRequested,
+                this, [this]() {
+                    LOG_INFO("[Widget] 侧边栏 openFolderRequested 信号已接收");
+                    // 侧边栏 onExplorerOpenFolder 已自行设置工作目录并刷新文件列表
+                    // 此处统一处理 UI 状态：隐藏欢迎页、同步标题栏等
+                    if (m_welcomePage) m_welcomePage->hide();
+                    // P0-2: 同步工作区根目录到 LSP 协调器，使 clangd 使用正确的项目根目录
+                    if (m_lspCoordinator && m_sideBar) {
+                        m_lspCoordinator->setWorkspaceRoot(m_sideBar->currentWorkDir());
+                    }
+                });
 
-    // Git 面板：获取 SideBar 内嵌的 GitPanel 并连接信号
-    m_gitPanel = m_sideBar->gitPanelWidget();
+        // Git 面板：获取 SideBar 内嵌的 GitPanel 并连接信号
+        m_gitPanel = m_sideBar->gitPanelWidget();
+    }
     if (m_gitPanel) {
         connect(m_gitPanel, &GitPanel::fileDiffRequested, this, [this](const QString& filePath) {
             // 打开该文件的 diff 视图
@@ -270,7 +272,7 @@ Widget::Widget(QWidget *parent)
     restoreWindowState();
 
     // 13. 自动保存定时器（根据配置启用）
-    if (config.autoSave()) {
+    if (ConfigManager::instance().autoSave()) {
         m_autoSaveTimer = new QTimer(this);
         m_autoSaveTimer->setInterval(30000);  // 30秒自动保存
         connect(m_autoSaveTimer, &QTimer::timeout, this, [this]() {
@@ -338,10 +340,14 @@ void Widget::createUi()
     m_hSplitter->setObjectName(QStringLiteral("hSplitter"));
     m_hSplitter->setChildrenCollapsible(false);  // 不允许折叠到0
 
-    // 左侧资源栏
-    m_sideBar = new SideBar(this);
-    // SideBar 自身已设 min/maxWidth，这里不再覆盖
-    m_hSplitter->addWidget(m_sideBar);
+    // 左侧资源栏（根据产品线配置条件化创建）
+    if (m_productConfig.fileTree) {
+        m_sideBar = new SideBar(this);
+        // SideBar 自身已设 min/maxWidth，这里不再覆盖
+        m_hSplitter->addWidget(m_sideBar);
+    } else {
+        m_sideBar = nullptr;
+    }
 
     // 右侧：编辑区 + 终端 垂直分割
     m_vSplitter = new QSplitter(Qt::Vertical, this);
@@ -353,9 +359,11 @@ void Widget::createUi()
 
     // 依赖注入：LspCoordinator 需要 tabBar 查找编辑器、completer 注入补全候选
     // （m_lspCoordinator 在前序步骤已创建，此处补齐依赖）
-    m_lspCoordinator->setTabBar(m_tabBar);
-    if (auto* completerImpl = dynamic_cast<TextCompleter*>(m_completer)) {
-        m_lspCoordinator->setCompleter(completerImpl);
+    if (m_lspCoordinator) {
+        m_lspCoordinator->setTabBar(m_tabBar);
+        if (auto* completerImpl = dynamic_cast<TextCompleter*>(m_completer)) {
+            m_lspCoordinator->setCompleter(completerImpl);
+        }
     }
 
     // V1.9: 编辑器分栏分割器（m_tabBar | m_splitView）
@@ -389,9 +397,14 @@ void Widget::createUi()
     m_vSplitter->addWidget(m_welcomePage);
 
     // 终端面板（VSCode Panel模式：面板标题栏 + 终端内容区）
-    m_terminalPanel = createTerminalPanel();
-    m_terminalPanel->hide();
-    m_vSplitter->addWidget(m_terminalPanel);
+    // 根据产品线配置条件化创建 — notebook/editor 不需要终端
+    if (m_productConfig.terminal) {
+        m_terminalPanel = createTerminalPanel();
+        m_terminalPanel->hide();
+        m_vSplitter->addWidget(m_terminalPanel);
+    } else {
+        m_terminalPanel = nullptr;
+    }
 
     // 默认分割比例：标签栏(35) : 查找栏(隐藏0) : 欢迎页(占满) : 终端(隐藏)
     m_vSplitter->setSizes({35, 0, 500, 0});

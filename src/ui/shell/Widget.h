@@ -17,6 +17,7 @@
 #include "interfaces/core/IObserver.h"
 #include "interfaces/core/IFileOperator.h"
 #include "interfaces/editor/ICompleter.h"
+#include "factory/ProductConfig.h"
 
 #include <QWidget>
 #include <QVBoxLayout>
@@ -51,8 +52,13 @@ class Widget : public FramelessWindow, public IObserver
     Q_OBJECT
 
 public:
-    explicit Widget(QWidget *parent = nullptr);
+    /// @brief 构造主窗口
+    /// @param config 产品线配置（决定哪些子系统被初始化），默认为 IDE 全功能
+    explicit Widget(const ProductConfig& config = ProductConfig::ide(), QWidget *parent = nullptr);
     ~Widget();
+
+    /// @brief 获取当前产品线配置
+    const ProductConfig& productConfig() const { return m_productConfig; }
 
     // ========== IObserver 接口实现 ==========
     void onUpdate(const QString& event, const QVariant& data = QVariant()) override;
@@ -241,6 +247,9 @@ private:
 
     // === LSP 语言服务器管理器（门面模式，多语言客户端生命周期+信号路由）===
     LspCoordinator* m_lspCoordinator = nullptr;  // LSP 协调器（拥有 LspManager）
+
+    // === 产品线配置 ===
+    ProductConfig m_productConfig;  ///< 产品线功能开关（注入式配置）
 
     // ========== 辅助方法 ==========
     /// 注册快捷键命令（通过 ShortcutFilter 统一管理，Command+Filter+Observer 模式）
