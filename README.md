@@ -257,7 +257,7 @@ SoulCove
 
 - Qt 6.5+
 - CMake 3.16+
-- C++20 Compiler
+- C++17 Compiler
 - MinGW-w64 14+ or MSVC
 - clangd 19+
 - OpenSSL 3.x
@@ -377,7 +377,7 @@ SoulCove is built around four principles:
 
 | Layer | Technology |
 |--------|------------|
-| Language | C++20 |
+| Language | C++17 |
 | UI | Qt 6 Widgets |
 | Build | CMake |
 | LSP | clangd |
