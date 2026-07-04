@@ -1,10 +1,6 @@
 # SoulCove
 
 <p align="center">
-  <img src="assets/logo.png" width="128" alt="SoulCove Logo">
-</p>
-
-<p align="center">
   <b>A Modern Native Code Editing Platform Built with Qt 6</b><br>
   Lightweight • High Performance • Cross Platform • Developer First
 </p>
