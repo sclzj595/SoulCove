@@ -1,0 +1,695 @@
+/* ============================================================
+ * SoulCove 全局现代化样式表 (VSCode Dark Theme)
+ * 所有控件统一样式入口，支持一键主题切换
+ * ============================================================ */
+
+/* ========== 全局基础 ========== */
+QWidget {
+    font-family: 'Consolas', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+    font-size: 13px;
+    color: #d4d4d4;
+}
+
+/* ========== 无边框主窗口（半透明背景，配合Windows亚克力磨砂） ========== */
+#mainWindow {
+    background-color: rgba(30, 30, 30, 0.92);
+}
+
+/* ============================================================
+ * 标题栏（TitleBar）— VSCode 风格，实色不透明背景
+ * ============================================================ */
+#titleBar {
+    background-color: #2d2d30;
+    border-bottom: 1px solid #3c3c3c;
+}
+
+#titleBar > QLabel#titleLabel {
+    color: #cccccc;
+    font-size: 13px;
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+
+/* 标题栏窗口控制按钮 — 基础状态 */
+#titleBar QPushButton {
+    color: #cccccc;
+    border: none;
+    background: transparent;
+    font-size: 16px;
+    font-weight: bold;
+    padding: 0;
+    border-radius: 0;
+}
+
+#titleBar QPushButton:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+#titleBar QPushButton:pressed {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+/* 标题栏工具图标按钮（新建/打开/保存）— border-image 不被通用规则覆盖 */
+#titleBar #btnNew {
+    border-image: url(:/note_blue);
+    background: transparent;
+}
+#titleBar #btnNew:hover {
+    border-image: url(:/note);
+    background-color: rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+}
+
+#titleBar #btnOpen {
+    border-image: url(:/open_blue);
+    background: transparent;
+}
+#titleBar #btnOpen:hover {
+    border-image: url(:/open);
+    background-color: rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+}
+
+#titleBar #btnSave {
+    border-image: url(:/save_blue);
+    background: transparent;
+}
+#titleBar #btnSave:hover {
+    border-image: url(:/save);
+    background-color: rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+}
+
+/* 关闭按钮特殊hover色 */
+#titleBar #btnClose:hover {
+    background-color: #c42b1c;
+    color: #ffffff;
+}
+
+#titleBar #btnClose:pressed {
+    background-color: #a02215;
+    color: #ffffff;
+}
+
+/* 设置按钮（齿轮图标） */
+#titleBar #btnSettings {
+    color: #aaaaaa;
+    font-size: 16px;
+    border: none;
+    background: transparent;
+    border-radius: 4px;
+}
+
+#titleBar #btnSettings:hover {
+    color: #ffffff;
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* 分隔符 */
+#titleBar #titleSeparator {
+    color: #555555;
+    font-size: 14px;
+    background: transparent;
+    border: none;
+    padding: 0 2px;
+}
+
+/* ============================================================
+ * 工具栏面板 — 紧凑型，与标题栏同色系
+ * ============================================================ */
+#toolBarWidget {
+    background-color: #2d2d30;
+    border-bottom: 1px solid #3c3c3c;
+}
+
+/* 工具栏图标按钮 */
+#toolBarWidget QPushButton {
+    border: none;
+    border-radius: 4px;
+    background-color: transparent;
+    padding: 3px;
+}
+
+#toolBarWidget QPushButton:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+#toolBarWidget QPushButton:pressed {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+/* ============================================================
+ * 编辑区 (MyTextEdit)
+ * ============================================================ */
+QTextEdit {
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    selection-background-color: #264f78;
+    selection-color: #ffffff;
+    border: none;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 14px;
+    padding: 2px 4px;
+}
+
+QTextEdit:focus {
+    border: none;
+}
+
+/* ============================================================
+ * 状态栏面板
+ * ============================================================ */
+#statusBar {
+    background-color: #007acc;
+    border: none;
+    border-top: none;
+}
+
+#statusBar QLabel {
+    color: #ffffff;
+    font-size: 12px;
+    background: transparent;
+}
+
+#statusBar QComboBox {
+    color: #ffffff;
+    background-color: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 12px;
+    min-width: 100px;
+}
+
+#statusBar QComboBox::drop-down {
+    border: none;
+    width: 16px;
+}
+
+#statusBar QComboBox::down-arrow {
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #ffffff;
+    margin-right: 4px;
+}
+
+#statusBar QComboBox QAbstractItemView {
+    color: #cccccc;
+    background-color: #252526;
+    selection-background-color: #094771;
+    border: 1px solid #3c3c3c;
+    padding: 2px;
+}
+
+/* ============================================================
+ * 滚动条 - VSCode极简细滚动条
+ * ============================================================ */
+QScrollBar:vertical {
+    width: 10px;
+    background: #1e1e1e;
+    margin: 0;
+}
+
+QScrollBar::handle:vertical {
+    min-height: 30px;
+    background-color: #424242;
+    border-radius: 5px;
+    margin: 2px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #555555;
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+    height: 0;
+}
+
+QScrollBar::add-page:vertical,
+QScrollBar::sub-page:vertical {
+    background: #1e1e1e;
+}
+
+QScrollBar:horizontal {
+    height: 10px;
+    background: #1e1e1e;
+    margin: 0;
+}
+
+QScrollBar::handle:horizontal {
+    min-width: 30px;
+    background-color: #424242;
+    border-radius: 5px;
+    margin: 2px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background-color: #555555;
+}
+
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal {
+    width: 0;
+}
+
+/* ============================================================
+ * 图标按钮（通用）
+ * ============================================================ */
+QPushButton[iconButton="true"] {
+    border: none;
+    border-radius: 4px;
+    background-color: transparent;
+    padding: 4px;
+}
+
+QPushButton[iconButton="true"]:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+QPushButton[iconButton="true"]:pressed {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+/* ============================================================
+ * 按钮（通用）
+ * ============================================================ */
+QPushButton {
+    border: none;
+    border-radius: 4px;
+    background-color: transparent;
+    padding: 4px 12px;
+    color: #cccccc;
+}
+
+QPushButton:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+QPushButton:pressed {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+/* ============================================================
+ * 下拉框
+ * ============================================================ */
+QComboBox {
+    color: #cccccc;
+    background-color: #3c3c3c;
+    border: 1px solid #4f4f4f;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    min-width: 120px;
+}
+
+QComboBox:hover {
+    border: 1px solid #007acc;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 20px;
+}
+
+QComboBox::down-arrow {
+    image: none;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid #aaaaaa;
+    margin-right: 8px;
+}
+
+QComboBox QAbstractItemView {
+    color: #cccccc;
+    background-color: #252526;
+    selection-background-color: #094771;
+    border: 1px solid #4f4f4f;
+    padding: 2px;
+}
+
+/* ============================================================
+ * 标签
+ * ============================================================ */
+QLabel {
+    color: #999999;
+    font-size: 12px;
+    background: transparent;
+    border: none;
+}
+
+/* ============================================================
+ * 补全弹窗 (QListWidget)
+ * ============================================================ */
+QListWidget {
+    background-color: #252526;
+    border: 1px solid #4f4f4f;
+    border-radius: 6px;
+    padding: 2px;
+    color: #d4d4d4;
+}
+
+QListWidget::item {
+    padding: 4px 12px;
+    border-radius: 3px;
+}
+
+QListWidget::item:selected {
+    background-color: #094771;
+    color: #ffffff;
+}
+
+QListWidget::item:hover:!selected {
+    background-color: rgba(80, 80, 90, 0.3);
+}
+
+/* ============================================================
+ * 消息框美化
+ * ============================================================ */
+QMessageBox {
+    background-color: #2d2d30;
+    color: #d4d4d4;
+}
+
+QMessageBox QLabel {
+    color: #d4d4d4;
+}
+
+QMessageBox QPushButton {
+    background-color: #0e639c;
+    color: white;
+    border-radius: 4px;
+    padding: 6px 20px;
+    min-width: 80px;
+}
+
+QMessageBox QPushButton:hover {
+    background-color: #1177bb;
+}
+
+QMessageBox QPushButton:default {
+    background-color: #0e639c;
+}
+
+/* ============================================================
+ * 文件对话框美化
+ * ============================================================ */
+QFileDialog {
+    background-color: #2d2d30;
+}
+
+/* ============================================================
+ * VSCode 标签页栏（EditorTabBar）样式
+ * ============================================================ */
+
+/* 标签页栏容器 */
+#editorTabBar {
+    background-color: #252526;
+    border-bottom: 1px solid #3c3c3c;
+}
+
+QTabBar#editorTabBar {
+    background: transparent;
+    font-size: 13px;
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+}
+
+/* 隐藏标签页滚动按钮 */
+QTabBar#editorTabBar::scroller {
+    width: 0px;
+}
+
+/* 标签页 - 基础样式 */
+QTabBar#editorTabBar::tab {
+    color: #969696;
+    background-color: #2d2d30;
+    border: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 6px 12px;
+    margin-right: 1px;
+    margin-top: 2px;
+    min-width: 100px;
+    max-width: 200px;
+}
+
+/* 标签页 - 悬浮 */
+QTabBar#editorTabBar::tab:hover {
+    background-color: #323232;
+    color: #cccccc;
+}
+
+/* 标签页 - 选中激活 */
+QTabBar#editorTabBar::tab:selected {
+    background-color: #1e1e1e;
+    color: #ffffff;
+    border-top: 2px solid #007acc;
+    margin-top: 0;
+    padding-top: 6px;
+}
+
+/* 标签页 - 关闭按钮 */
+QTabBar#editorTabBar::close-button {
+    image: url(:/close);
+    subcontrol-position: right center;
+    subcontrol-origin: padding;
+    width: 16px;
+    height: 16px;
+    margin-right: 4px;
+    border-radius: 8px;
+    background: transparent;
+}
+
+/* 编辑器堆栈 */
+#editorStack {
+    background-color: #1e1e1e;
+    border: none;
+}
+
+/* ============================================================
+ * 左侧资源栏（SideBar）样式
+ * ============================================================ */
+
+/* 整体侧边栏 */
+#sideBar {
+    background-color: rgba(37, 37, 38, 0.92);
+    border-right: 1px solid #3c3c3c;
+}
+
+/* 活动图标栏 */
+#activityBar {
+    background-color: #333333;
+}
+
+/* 侧边面板 */
+#sidePanel {
+    background-color: #252526;
+}
+
+/* 侧边栏文件列表 */
+#sideFileList {
+    background-color: transparent;
+    border: none;
+    font-size: 13px;
+    color: #cccccc;
+}
+
+#sideFileList::item {
+    padding: 4px 8px;
+    border-radius: 3px;
+    margin: 1px 4px;
+}
+
+#sideFileList::item:hover {
+    background-color: rgba(80, 80, 90, 0.35);
+}
+
+#sideFileList::item:selected {
+    background-color: #094771;
+    color: #ffffff;
+}
+
+/* ============================================================
+ * 终端面板 (Terminal Panel) — VSCode Panel 风格
+ * ============================================================ */
+
+/* 面板容器 */
+#terminalPanel {
+    background-color: #1e1e1e;
+    border-top: 1px solid #3c3c3c;
+}
+
+/* 面板标题栏 */
+#panelHeaderBar {
+    background-color: #252526;
+    border-bottom: 1px solid #3c3c3c;
+}
+
+/* 标题栏标签按钮（终端/问题/输出）*/
+#panelHeaderBar #panelTab {
+    color: #969696;
+    font-size: 12px;
+    padding: 4px 14px;
+    margin-right: 2px;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+}
+
+#panelHeaderBar #panelTab:hover {
+    color: #ffffff;
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+#panelHeaderBar #panelTab:checked {
+    color: #ffffff;
+    background-color: rgba(255, 255, 255, 0.12);
+    border-bottom: 2px solid #007acc;
+}
+
+#panelHeaderBar #panelTab:checked:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+/* 关闭按钮 */
+#panelCloseBtn {
+    color: #858585;
+    border: none;
+    background: transparent;
+    font-size: 16px;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+#panelCloseBtn:hover {
+    color: #ffffff;
+    background-color: #c42b1c;
+}
+
+/* 终端标签栏 — 完全覆盖 Windows 原生样式 */
+#terminalTabBar {
+    background-color: #252526;
+    border-bottom: 1px solid #3c3c3c;
+    qproperty-drawBase: 0;
+    /* 强制禁用原生样式 */
+    font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+}
+
+#terminalTabBar::tab {
+    color: #969696;
+    font-size: 11px;
+    padding: 5px 12px;
+    margin-right: 0;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-top-left-radius: 3px;
+    border-top-right-radius: 3px;
+    background-color: #2d2d2d;
+    min-width: 70px;
+}
+
+#terminalTabBar::tab:selected {
+    color: #ffffff;
+    background-color: #1e1e1e;
+    border: 1px solid #3c3c3c;
+    border-bottom: 1px solid #1e1e1e;   /* 与内容区背景融合，隐藏下边框 */
+}
+
+#terminalTabBar::tab:hover:!selected {
+    color: #cccccc;
+    background-color: #383838;
+    border: 1px solid #4a4a4a;
+    border-bottom: none;
+}
+
+#terminalTabBar::tab:first {
+    /* 第一个标签左边不留间距 */
+    padding-left: 10px;
+}
+
+/* 关闭按钮（标签上的 ✕）*/
+#terminalTabBar::close-button {
+    image: url(:/icons/close);
+    subcontrol-position: right;
+    subcontrol-origin: padding;
+    width: 14px;
+    height: 14px;
+    margin-right: 4px;
+}
+
+#terminalTabBar::close-button:hover {
+    background-color: #c42b1c;
+    border-radius: 2px;
+}
+
+#terminalTabBar::close-button:pressed {
+    background-color: #a62819;
+}
+
+/* 搜索栏 */
+#terminalSearchBar {
+    background-color: #3c3c3c;
+    border-bottom: 1px solid #454545;
+}
+
+#terminalSearchInput {
+    background-color: #404040;
+    color: #cccccc;
+    border: 1px solid #555555;
+    border-radius: 3px;
+    padding: 4px 8px;
+    font-size: 12px;
+    selection-background-color: #264f78;
+}
+
+#terminalSearchInput:focus {
+    border-color: #007acc;
+}
+
+#searchNavBtn {
+    background-color: transparent;
+    color: #cccccc;
+    border: 1px solid #555555;
+    border-radius: 3px;
+    font-size: 11px;
+    min-width: 24px;
+    min-height: 22px;
+}
+
+#searchNavBtn:hover {
+    background-color: #505050;
+    border-color: #707070;
+}
+
+#searchNavBtn:pressed {
+    background-color: #606060;
+}
+
+#searchResultLabel {
+    color: #858585;
+    font-size: 11px;
+    padding: 0 4px;
+}
+
+/* 终端视图（统一输入输出区） */
+#terminalView {
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    border: none;
+    font-family: Consolas, 'Courier New', monospace;
+    selection-background-color: #264f78;
+    selection-color: #ffffff;
+}
+
+#terminalView:focus {
+    border: none;
+}
+
+/* 欢迎页图标水印 */
+QLabel#welcomeIcon {
+    /* QSS opacity 控制透明度 */
+}

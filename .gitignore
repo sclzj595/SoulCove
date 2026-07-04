@@ -1,0 +1,83 @@
+# ===== Build output =====
+/build/
+build-*/
+out/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+cmake-build-*/
+compile_commands.json
+*.rcc/
+
+# ===== Object / executable / library artifacts =====
+*.obj
+*.o
+*.exe
+*.a
+*.dll
+*.lib
+*.so
+*.dylib
+
+# ===== Qt generated =====
+*.qm
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+*_autogen/
+QM_OUTPUT_DIR
+moc_predefs.h
+
+# ===== IDE / Editor =====
+.vscode/
+.idea/
+*.user
+*.user.*
+*.kdev4
+*.kate-swp
+*.swp
+*~
+.cache/
+*.suo
+*.pdb
+*.ilk
+*.exp
+.ccls-cache/
+.clangd/
+CMakeUserPresets.json
+
+# ===== Qt Creator =====
+*.pro.user
+*.pro.user.*
+CMakeLists.txt.user
+*.qmlproject.user
+
+# ===== Third-party source archives / builds =====
+third_party/*.tar.gz
+third_party/*.zip
+third_party/libssh2-build/
+third_party/rpc-framework/
+
+# ===== Logs =====
+*.log
+debug.log
+
+# ===== OS files =====
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ===== Local config / secrets =====
+.env
+.env.local
+
+# ===== Demo / test files =====
+*.pdf
+*demoHtml.html
+Files/test*.txt
+Files/demo*.txt
+Files/*test*.txt
+Files/append*.txt

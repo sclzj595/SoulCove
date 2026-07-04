@@ -11,7 +11,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Qt-6.5+-41CD52?logo=qt">
-  <img src="https://img.shields.io/badge/C%2B%2B-20-blue?logo=cplusplus">
+  <img src="https://img.shields.io/badge/C%2B%2B-17-blue?logo=cplusplus">
   <img src="https://img.shields.io/badge/CMake-3.16+-064F8C?logo=cmake">
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey">
   <img src="https://img.shields.io/badge/License-MIT-green">
@@ -261,7 +261,7 @@ SoulCove
 
 - Qt 6.5+
 - CMake 3.16+
-- C++20 Compiler
+- C++17 Compiler
 - MinGW-w64 14+ or MSVC
 - clangd 19+
 - OpenSSL 3.x
@@ -381,7 +381,7 @@ SoulCove is built around four principles:
 
 | Layer | Technology |
 |--------|------------|
-| Language | C++20 |
+| Language | C++17 |
 | UI | Qt 6 Widgets |
 | Build | CMake |
 | LSP | clangd |
