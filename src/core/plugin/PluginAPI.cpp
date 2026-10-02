@@ -7,6 +7,14 @@
 #include <QStandardPaths>
 #include <QFileInfo>
 
+/// 宿主支持订阅的事件白名单（与 FileOperator notifyObservers 事件名对齐）
+static const QStringList kSupportedEvents = {
+    QStringLiteral("fileOpened"),
+    QStringLiteral("fileSaved"),
+    QStringLiteral("fileClosed"),
+    QStringLiteral("encodingChanged"),
+};
+
 PluginAPI::PluginAPI(QString appVersion)
     : m_appVersion(std::move(appVersion))
 {
@@ -37,7 +45,7 @@ bool PluginAPI::registerCommand(const QString& id, const QString& description,
         return false;
     }
     m_commandRegistry->registerCommand(id, std::move(handler));
-    m_commandOwners[id] = description;
+    m_commandOwnerByCommand[id] = m_currentPluginOwner;
     LOG_INFO_S("PluginAPI", "registerCommand",
                "插件命令已注册: " << id.toStdString() << " (" << description.toStdString() << ")");
     return true;
@@ -59,7 +67,85 @@ QString PluginAPI::applicationVersion() const
     return m_appVersion;
 }
 
+IPluginAPI::DocumentInfo PluginAPI::currentDocument() const
+{
+    return m_documentProvider ? m_documentProvider() : IPluginAPI::DocumentInfo{};
+}
+
+int PluginAPI::subscribeEvent(const QString& event,
+                              std::function<void(const QVariant& data)> handler)
+{
+    if (!kSupportedEvents.contains(event)) {
+        LOG_WARN_S("PluginAPI", "subscribeEvent",
+                   "不支持的事件名: " << event.toStdString());
+        return -1;
+    }
+    if (!handler) {
+        LOG_WARN_S("PluginAPI", "subscribeEvent", "空的订阅回调");
+        return -1;
+    }
+    const int id = m_nextSubscriptionId++;
+    m_subscriptions[id] = EventSubscription{ m_currentPluginOwner, event, std::move(handler) };
+    LOG_INFO_S("PluginAPI", "subscribeEvent",
+               "插件 " << m_currentPluginOwner.toStdString() << " 订阅事件 "
+                      << event.toStdString() << " (id=" << id << ")");
+    return id;
+}
+
+bool PluginAPI::unsubscribeEvent(int subscriptionId)
+{
+    return m_subscriptions.remove(subscriptionId) > 0;
+}
+
+void PluginAPI::dispatchEvent(const QString& event, const QVariant& data)
+{
+    for (auto it = m_subscriptions.begin(); it != m_subscriptions.end(); ++it) {
+        if (it.value().event == event && it.value().handler) {
+            it.value().handler(data);
+        }
+    }
+}
+
 void PluginAPI::setCommandRegistry(CommandRegistry* registry)
 {
     m_commandRegistry = registry;
+}
+
+void PluginAPI::setDocumentProvider(std::function<DocumentInfo()> provider)
+{
+    m_documentProvider = std::move(provider);
+}
+
+void PluginAPI::setCurrentPluginOwner(const QString& pluginName)
+{
+    m_currentPluginOwner = pluginName;
+}
+
+void PluginAPI::removePluginRegistrations(const QString& pluginName)
+{
+    // 清理该插件注册的命令（从 CommandRegistry 注销，命令面板中失效）
+    for (auto it = m_commandOwnerByCommand.begin(); it != m_commandOwnerByCommand.end(); ) {
+        if (it.value() == pluginName) {
+            if (m_commandRegistry) {
+                m_commandRegistry->unregisterCommand(it.key());
+            }
+            LOG_DEBUG_S("PluginAPI", "removePluginRegistrations",
+                        "移除插件命令: " << it.key().toStdString());
+            it = m_commandOwnerByCommand.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // 清理该插件的事件订阅（防悬垂回调 — 插件实例即将卸载）
+    for (auto it = m_subscriptions.begin(); it != m_subscriptions.end(); ) {
+        if (it.value().owner == pluginName) {
+            LOG_DEBUG_S("PluginAPI", "removePluginRegistrations",
+                        "移除插件订阅: " << pluginName.toStdString()
+                                        << " (id=" << it.key() << ")");
+            it = m_subscriptions.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }

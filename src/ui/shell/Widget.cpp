@@ -538,6 +538,9 @@ void Widget::onUpdate(const QString& event, const QVariant& data)
     else if (event == "encodingChanged") {
         LOG_DEBUG("[Observer] 编码变更:" << data.toString());
     }
+
+    // M7 v1.1: 宿主观察者事件转发给已订阅插件（fileOpened/fileSaved/fileClosed/encodingChanged）
+    PluginManager::instance().dispatchEvent(event, data);
 }
 
 // ========== UI 构建（VSCode 三栏布局）==========
@@ -3468,6 +3471,15 @@ void Widget::registerCommands()
 
     // M7: 将命令注册表注入插件系统（插件命令进入同一命令面板，统一触发入口）
     PluginManager::instance().setCommandRegistry(&m_commandRegistry);
+    // M7 v1.1: 注入当前文档提供者（插件经 currentDocument() 只读访问编辑器内容）
+    PluginManager::instance().setDocumentProvider([this]() -> IPluginAPI::DocumentInfo {
+        if (!m_currentTextEdit) return {};
+        IPluginAPI::DocumentInfo info;
+        info.path = m_tabBar->currentFilePath();
+        info.text = m_currentTextEdit->toPlainText();
+        info.valid = !info.path.isEmpty();
+        return info;
+    });
 }
 
 void Widget::onToggleCommandPalette()

@@ -31,6 +31,18 @@ bool HelloPlugin::initialize(IPluginAPI* api)
                                  m_api->log(QStringLiteral("[com.soulcove.hello] Hello, SoulCove!"));
                              }
                          });
+
+    // v1.1: 演示事件订阅（文件保存时打印当前文档统计）
+    m_subId = api->subscribeEvent(QStringLiteral("fileSaved"), [this](const QVariant&) {
+        if (!m_api) return;
+        const auto doc = m_api->currentDocument();
+        if (doc.valid) {
+            m_api->log(QStringLiteral("[com.soulcove.hello] 文件已保存: ")
+                       + doc.path + QStringLiteral(" (")
+                       + QString::number(doc.text.length()) + QStringLiteral(" 字符)"));
+        }
+    });
+
     return true;
 }
 

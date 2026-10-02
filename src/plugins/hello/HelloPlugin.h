@@ -28,6 +28,7 @@ public:
 
 private:
     IPluginAPI* m_api = nullptr;   ///< 宿主 API（shutdown 后置空，不得持有）
+    int m_subId = -1;              ///< fileSaved 事件订阅ID（v1.1 演示）
 };
 
 #endif // HELLOPLUGIN_H

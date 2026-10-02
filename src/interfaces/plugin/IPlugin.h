@@ -42,7 +42,8 @@ public:
 };
 
 /// 插件接口 IID（Q_DECLARE_INTERFACE 供 QPluginLoader / qobject_cast 做类型安全转换）
-#define SoulCovePluginIID "com.soulcove.plugin/1.0"
+/// /1.1: IPluginAPI 新增文档访问（currentDocument）与事件订阅（subscribeEvent）
+#define SoulCovePluginIID "com.soulcove.plugin/1.1"
 Q_DECLARE_INTERFACE(IPlugin, SoulCovePluginIID)
 
 #endif // IPLUGIN_H

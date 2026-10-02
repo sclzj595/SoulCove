@@ -6,6 +6,12 @@ void CommandRegistry::registerCommand(const QString& id, Handler handler)
     m_commands.insert(id, std::move(handler));
 }
 
+bool CommandRegistry::unregisterCommand(const QString& id)
+{
+    // M7: 插件 shutdown 后移除其注册的命令（前缀命令不支持按所有者注销）
+    return m_commands.remove(id) > 0;
+}
+
 void CommandRegistry::registerPrefixCommand(const QString& prefix, PrefixHandler handler)
 {
     m_prefixCommands.insert(prefix, std::move(handler));

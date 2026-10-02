@@ -26,11 +26,29 @@ PluginManager::~PluginManager()
 
 void PluginManager::setCommandRegistry(CommandRegistry* registry)
 {
+    ensureApi();
+    m_api->setCommandRegistry(registry);
+}
+
+void PluginManager::setDocumentProvider(std::function<IPluginAPI::DocumentInfo()> provider)
+{
+    ensureApi();
+    m_api->setDocumentProvider(std::move(provider));
+}
+
+void PluginManager::dispatchEvent(const QString& event, const QVariant& data)
+{
+    if (m_api && !m_records.isEmpty()) {
+        m_api->dispatchEvent(event, data);
+    }
+}
+
+void PluginManager::ensureApi()
+{
     if (!m_api) {
         // API 在首次注入注册表或首次加载插件时惰性创建（需要应用版本号）
         m_api = std::make_unique<PluginAPI>(QCoreApplication::applicationVersion());
     }
-    m_api->setCommandRegistry(registry);
 }
 
 QStringList PluginManager::libraryNameFilters()
@@ -87,6 +105,8 @@ int PluginManager::loadPlugins(const QString& dir)
         }
 
         // 初始化（错误隔离：单个插件失败不影响其余插件）
+        // v1.1: 设置所有者上下文 — initialize() 期间的命令/订阅注册归属该插件
+        m_api->setCurrentPluginOwner(record.name);
         if (record.instance->initialize(m_api.get())) {
             record.initialized = true;
             ++okCount;
@@ -114,9 +134,11 @@ void PluginManager::shutdownAll()
     if (m_records.isEmpty()) return;
 
     // 逆序 shutdown（后加载的插件先关闭，降低依赖顺序风险）
+    // v1.1: shutdown 前先移除该插件注册的命令与事件订阅（防悬垂回调）
     PluginLoader loader;
     for (auto it = m_records.rbegin(); it != m_records.rend(); ++it) {
         if (it->initialized && it->instance) {
+            if (m_api) m_api->removePluginRegistrations(it->name);
             it->instance->shutdown();
             it->initialized = false;
             LOG_DEBUG_S("PluginManager", "shutdownAll",

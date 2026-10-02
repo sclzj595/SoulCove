@@ -10,6 +10,13 @@
 
 // ========== 文件读写 ==========
 
+// O11 设计决策（M4 收口记录，2026-10-02）：
+// readFile 保持同步读取，不改 QtConcurrent 异步。理由：
+// 1) 本地磁盘（SSD）单文件 readAll 延迟为亚毫秒~毫秒级，不构成可感知卡顿；
+// 2) 现有 6 处调用方（打开对话框 / readFileWithEol / 工作区恢复循环 / Diff 对比）
+//    全部依赖"返回即得内容"的语义，异步化需引入回调链或协程，复杂度收益比极差；
+// 3) 大目录批量场景（工作区恢复）逐文件读取属用户可等待的确定性操作。
+// 若未来引入网络文件系统/超大文件（>100MB）场景，再评估异步化或分块流式读取。
 QString FileController::readFile(const QString& filePath,
                                  QString* detectedEncoding)
 {

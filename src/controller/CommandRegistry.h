@@ -35,6 +35,10 @@ public:
     /// @param handler 命令处理器
     void registerCommand(const QString& id, Handler handler);
 
+    /// 注销命令（M7: 插件 shutdown 后移除其注册的命令）
+    /// @return true 表示命令存在并已移除
+    bool unregisterCommand(const QString& id);
+
     /// 注册前缀命令（用于动态命令，如 "snippet.insert:keyword"）
     /// @param prefix 命令前缀（如 "snippet.insert:"）
     /// @param handler 前缀处理器（接收前缀后的部分）

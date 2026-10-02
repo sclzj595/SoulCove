@@ -3,11 +3,14 @@
 
 #include "core/plugin/PluginLoader.h"
 #include "interfaces/plugin/IPlugin.h"
+#include "interfaces/plugin/IPluginAPI.h"
 
 #include <QHash>
 #include <QList>
 #include <QObject>
 #include <QString>
+#include <QVariant>
+#include <functional>
 #include <memory>
 
 class CommandRegistry;
@@ -39,6 +42,12 @@ public:
     /// 注入宿主命令注册表（Widget::registerCommands 后调用；插件命令经此进入命令面板）
     void setCommandRegistry(CommandRegistry* registry);
 
+    /// 注入当前文档提供者（Widget 持有 m_currentTextEdit；插件经 currentDocument() 访问）
+    void setDocumentProvider(std::function<IPluginAPI::DocumentInfo()> provider);
+
+    /// 事件派发（Widget::onUpdate 转发宿主观察者事件给已订阅插件）
+    void dispatchEvent(const QString& event, const QVariant& data);
+
     /// 扫描并加载目录下全部插件动态库（*.dll/*.so/*.dylib）
     /// @param dir 插件目录（默认应用目录下 plugins/）
     /// @return 成功初始化的插件数量
@@ -62,6 +71,9 @@ signals:
 
 private:
     explicit PluginManager(QObject* parent = nullptr);
+
+    /// 惰性创建共享 PluginAPI（需要 QApplication 版本号已设置）
+    void ensureApi();
 
     /// 平台动态库后缀过滤（*.dll / *.so / *.dylib）
     static QStringList libraryNameFilters();
