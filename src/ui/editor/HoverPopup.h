@@ -87,4 +87,8 @@ private:
     // H2: 防闪烁隐藏延时（鼠标离开后 50ms 才隐藏，期间返回则取消）
     QTimer m_hideDelayTimer;
     bool m_fadingOut = false;  ///< 当前是否正在淡出
+
+    // O30: 样式表缓存（仅由明/暗主题决定，主题切换时签名变化才重建）
+    mutable QString m_cachedStylesheet;
+    mutable QString m_styleSig;
 };

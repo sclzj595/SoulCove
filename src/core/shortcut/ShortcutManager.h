@@ -7,6 +7,7 @@
 #include <QMap>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QTimer>
 #include <memory>
 #include <functional>
 
@@ -91,7 +92,11 @@ public:
     QStringList checkConflict(const QKeySequence& key, const QString& excludeId = QString()) const;
 
     /// @brief 保存配置到文件
+    /// @brief 保存配置（O28: 500ms 防抖合并写盘）
     void saveConfig();
+
+    /// @brief 立即保存配置（绕过防抖，析构/退出前调用）
+    void saveConfigNow();
 
     /// @brief 从文件重新加载配置
     void reloadConfig();
@@ -154,6 +159,7 @@ private:
     QMap<QString, ShortcutItem> m_shortcuts;  ///< ID → 快捷键映射
     bool m_initialized = false;
     ShortcutPreset m_currentPreset = ShortcutPreset::Default;  ///< 当前预设方案
+    QTimer* m_saveDebounceTimer = nullptr;  ///< O28: 500ms 防抖写盘定时器
 };
 
 #endif // SHORTCUTMANAGER_H

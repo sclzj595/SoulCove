@@ -388,10 +388,23 @@ void SettingsPage::createEditorPage(QWidget* page)
     saveSection->setObjectName(QStringLiteral("settingsSectionTitle"));
     layout->addWidget(saveSection);
 
-    m_autoSaveCheck = new QCheckBox(tr("启用自动保存（30秒）"), page);
+    m_autoSaveCheck = new QCheckBox(tr("启用自动保存"), page);
     layout->addWidget(m_autoSaveCheck);
 
-    auto* autoSaveHint = new QLabel(tr("每30秒自动保存已修改的文件，避免意外丢失"), page);
+    // O29: 自动保存间隔可配置（秒）
+    auto* autoSaveIntervalLayout = new QHBoxLayout();
+    auto* autoSaveIntervalLabel = new QLabel(tr("自动保存间隔:"), page);
+    autoSaveIntervalLabel->setFixedWidth(120);
+    m_autoSaveIntervalSpin = new QSpinBox(page);
+    m_autoSaveIntervalSpin->setRange(5, 3600);
+    m_autoSaveIntervalSpin->setSuffix(tr(" 秒"));
+    m_autoSaveIntervalSpin->setValue(30);
+    autoSaveIntervalLayout->addWidget(autoSaveIntervalLabel);
+    autoSaveIntervalLayout->addWidget(m_autoSaveIntervalSpin);
+    autoSaveIntervalLayout->addStretch();
+    layout->addLayout(autoSaveIntervalLayout);
+
+    auto* autoSaveHint = new QLabel(tr("按设定间隔自动保存已修改的文件（5~3600 秒），避免意外丢失"), page);
     autoSaveHint->setObjectName(QStringLiteral("settingsHint"));
     layout->addWidget(autoSaveHint);
 
@@ -420,6 +433,8 @@ void SettingsPage::createEditorPage(QWidget* page)
             this, &SettingsPage::onTabSizeChanged);
     connect(m_autoSaveCheck, &QCheckBox::toggled,
             this, &SettingsPage::onAutoSaveToggled);
+    connect(m_autoSaveIntervalSpin, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, &SettingsPage::onAutoSaveIntervalChanged);
     connect(m_indentStyleCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &SettingsPage::onIndentStyleChanged);
     connect(m_formatToolPathBtn, &QPushButton::clicked,
@@ -1890,6 +1905,7 @@ void SettingsPage::loadCurrentConfig()
 
     // 编辑器
     m_autoSaveCheck->setChecked(config.autoSave());
+    m_autoSaveIntervalSpin->setValue(config.autoSaveInterval());  // O29
     m_completionCheck->setChecked(config.showCompletion());
     m_lineNumbersCheck->setChecked(config.showLineNumbers());
 
@@ -2037,6 +2053,13 @@ void SettingsPage::onFontSizeChanged(int value)
 void SettingsPage::onAutoSaveToggled(bool checked)
 {
     ConfigManager::instance().setAutoSave(checked);
+    emit configChanged();
+}
+
+void SettingsPage::onAutoSaveIntervalChanged(int value)
+{
+    // O29: 自动保存间隔（秒）
+    ConfigManager::instance().setAutoSaveInterval(value);
     emit configChanged();
 }
 
@@ -2487,6 +2510,7 @@ void SettingsPage::onResetCurrentSection()
         m_lineNumbersCheck->setChecked(true);
         m_tabSizeSpin->setValue(4);
         m_autoSaveCheck->setChecked(false);
+        m_autoSaveIntervalSpin->setValue(30);  // O29: 恢复默认间隔
         // M4: 格式化默认值
         m_indentStyleCombo->setCurrentIndex(0);  // Spaces
         m_formatToolPathLabel->setText(tr("(自动检测)"));
@@ -2641,6 +2665,7 @@ void SettingsPage::onExportConfig()
     // 编辑器
     QJsonObject editor;
     editor[QStringLiteral("autoSave")] = config.autoSave();
+    editor[QStringLiteral("autoSaveInterval")] = config.autoSaveInterval();  // O29
     editor[QStringLiteral("showLineNumbers")] = config.showLineNumbers();
     editor[QStringLiteral("showCompletion")] = config.showCompletion();
     editor[QStringLiteral("tabSize")] = config.getValue("Editor/tabSize", 4).toInt();
@@ -2731,6 +2756,10 @@ void SettingsPage::onImportConfig()
             bool autoSave = editor[QStringLiteral("autoSave")].toBool();
             config.setAutoSave(autoSave);
             m_autoSaveCheck->setChecked(autoSave);
+        }
+        if (editor.contains(QStringLiteral("autoSaveInterval"))) {  // O29
+            config.setAutoSaveInterval(editor[QStringLiteral("autoSaveInterval")].toInt());
+            m_autoSaveIntervalSpin->setValue(config.autoSaveInterval());
         }
         if (editor.contains(QStringLiteral("showLineNumbers"))) {
             bool show = editor[QStringLiteral("showLineNumbers")].toBool();

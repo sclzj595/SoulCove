@@ -54,9 +54,9 @@ ShortcutManager::ShortcutManager()
 
 ShortcutManager::~ShortcutManager()
 {
-    // RAII：析构时自动保存配置
+    // RAII：析构时自动保存配置（立即写盘 — 防抖定时器在进程退出前不会触发）
     if (m_initialized) {
-        saveConfig();
+        saveConfigNow();
     }
 }
 
@@ -136,7 +136,7 @@ void ShortcutManager::registerDefaults()
         QStringLiteral("edit.redo"),
         tr("重做"),
         QStringLiteral("编辑"),
-        QKeySequence(Qt::CTRL | Qt::Key_Y),
+        QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z),  // O25: 对齐 VSCode（原 Ctrl+Y 不符习惯）
         QKeySequence(Qt::CTRL | Qt::Key_Y),
         tr("重做撤销的操作")
     };
@@ -173,7 +173,7 @@ void ShortcutManager::registerDefaults()
         QStringLiteral("view.zoomIn"),
         tr("放大字体"),
         QStringLiteral("视图"),
-        QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Equal),
+        QKeySequence(Qt::CTRL | Qt::Key_Equal),  // O26: 对齐 VSCode（原 Ctrl+Shift+= 不符习惯）
         QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Equal),
         tr("增大编辑器字体")
     };
@@ -182,7 +182,7 @@ void ShortcutManager::registerDefaults()
         QStringLiteral("view.zoomOut"),
         tr("缩小字体"),
         QStringLiteral("视图"),
-        QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Minus),
+        QKeySequence(Qt::CTRL | Qt::Key_Minus),  // O26: 对齐 VSCode（与 Ctrl+= 成对）
         QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Minus),
         tr("减小编辑器字体")
     };
@@ -449,6 +449,21 @@ QString ShortcutManager::configFilePath() const
 }
 
 void ShortcutManager::saveConfig()
+{
+    // O28: 防抖合并写盘 — 连续修改（如批量应用 VSCode 预设/逐条录制）只触发一次磁盘写入，
+    // 500ms 静止后落盘；析构走 saveConfigNow() 立即写盘避免丢数据
+    if (!m_saveDebounceTimer) {
+        m_saveDebounceTimer = new QTimer(this);
+        m_saveDebounceTimer->setSingleShot(true);
+        m_saveDebounceTimer->setInterval(500);
+        connect(m_saveDebounceTimer, &QTimer::timeout, this, [this]() {
+            saveConfigNow();
+        });
+    }
+    m_saveDebounceTimer->start();
+}
+
+void ShortcutManager::saveConfigNow()
 {
     if (!m_initialized) return;
 

@@ -209,6 +209,28 @@ Widget::Widget(const ProductConfig& config, QWidget *parent)
             on_btnSave_clicked();
         }
     });
+    // O24: 分离窗口保存 — 按记录路径直接写盘，不经主窗口当前标签路径（避免存错文件）
+    connect(m_tabBar, &EditorTabBar::saveDetachedRequested,
+            this, [this](MyTextEdit* editor, const QString& filePath) {
+        if (!editor || !m_fileOperator) return;
+        QString target = filePath;
+        if (target.isEmpty()) {
+            // 未命名文件 → 另存为
+            target = QFileDialog::getSaveFileName(this, tr("另存为"),
+                QCoreApplication::applicationDirPath() + QStringLiteral("/Files/untitled.txt"),
+                tr("文本文件 (*.txt *.md);;所有文件 (*)"));
+            if (target.isEmpty()) return;  // 用户取消 → 保留修改标记（调用方据此中止关闭）
+        }
+        // T18: 抑制文件监听（内部保存不应触发 reload 提示）
+        m_suppressFileWatch = true;
+        FileController::writeFile(target, editor->toPlainText(),
+                                  m_comboBoxEncoding->currentText(), editor->eolMode());
+        if (m_fileWatcher && !m_fileWatcher->files().contains(target))
+            m_fileWatcher->addPath(target);
+        QTimer::singleShot(300, this, [this]() { m_suppressFileWatch = false; });
+        editor->setModified(false);
+        if (m_gitPanel) m_gitPanel->refresh();
+    });
     // P0-4: 标签关闭时通知 LSP 发送 didClose，释放 clangd 文档内存
     connect(m_tabBar, &EditorTabBar::fileClosed,
             this, [this](const QString& filePath) {
@@ -469,10 +491,10 @@ Widget::Widget(const ProductConfig& config, QWidget *parent)
     // 12. 窗口状态记忆恢复
     restoreWindowState();
 
-    // 13. 自动保存定时器（根据配置启用）
+    // 13. 自动保存定时器（根据配置启用；O29: 间隔可配置，默认 30 秒）
     if (ConfigManager::instance().autoSave()) {
         m_autoSaveTimer = new QTimer(this);
-        m_autoSaveTimer->setInterval(30000);  // 30秒自动保存
+        m_autoSaveTimer->setInterval(ConfigManager::instance().autoSaveInterval() * 1000);
         connect(m_autoSaveTimer, &QTimer::timeout, this, [this]() {
             if (m_currentTextEdit && m_currentTextEdit->isModified() && m_tabBar) {
                 QString path = m_tabBar->currentFilePath();
@@ -499,8 +521,8 @@ Widget::Widget(const ProductConfig& config, QWidget *parent)
         for (const auto& e : saved) {
             m_navStack.append({ e.first, e.second.first, e.second.second });
         }
-        if (m_navStack.size() > 50) {
-            m_navStack = m_navStack.mid(m_navStack.size() - 50);
+        if (m_navStack.size() > kMaxNavigationEntries) {
+            m_navStack = m_navStack.mid(m_navStack.size() - kMaxNavigationEntries);
         }
     }
 
@@ -2636,6 +2658,12 @@ void Widget::closeEvent(QCloseEvent* event)
         }
     }
 
+    // O24: 退出前收口分离窗口（拖出的独立编辑器），用户在保存确认中取消则中止关闭
+    if (m_tabBar && !m_tabBar->closeAllDetachedWindows()) {
+        event->ignore();
+        return;
+    }
+
     // P2-H04: 关闭主窗口时，若处于工作区模式（已关联 .scnb-workspace 文件），
     // 提示用户是否保存工作区（捕获最新的文件夹/打开文件/布局状态）
     auto& wsm = WorkspaceManager::instance();
@@ -2748,6 +2776,24 @@ void Widget::onSettingsClicked()
                             ed->setFontSize(size);
                         }
                     }
+                }
+            } else if (key == QStringLiteral("Editor/autoSaveInterval")) {
+                // O29: 自动保存间隔实时生效（秒）
+                int sec = value.toInt();
+                if (sec < 5) sec = ConfigManager::instance().autoSaveInterval();
+                if (m_autoSaveTimer) {
+                    m_autoSaveTimer->setInterval(sec * 1000);
+                } else if (ConfigManager::instance().autoSave()) {
+                    // 此前开关需重启才生效 → 现场补建定时器
+                    m_autoSaveTimer = new QTimer(this);
+                    m_autoSaveTimer->setInterval(sec * 1000);
+                    connect(m_autoSaveTimer, &QTimer::timeout, this, [this]() {
+                        if (m_currentTextEdit && m_currentTextEdit->isModified() && m_tabBar) {
+                            QString path = m_tabBar->currentFilePath();
+                            if (!path.isEmpty()) on_btnSave_clicked();
+                        }
+                    });
+                    m_autoSaveTimer->start();
                 }
             }
         });
@@ -3961,8 +4007,8 @@ void Widget::onLspGotoDefinition()
 
     // J2: 跳转前将当前位置压入导航历史栈，供 Ctrl+← 回退
     m_navStack.append({ path, ed->currentLine(), ed->currentColumn() });
-    // 限制栈深度，避免无限增长
-    if (m_navStack.size() > 50) m_navStack.removeFirst();
+    // O27: 限制栈深度，避免无限增长
+    if (m_navStack.size() > kMaxNavigationEntries) m_navStack.removeFirst();
     // P0 C03: 跳转到新位置时清空前进栈（与浏览器导航行为一致）
     m_navForwardStack.clear();
 
@@ -4011,7 +4057,7 @@ void Widget::onLspGotoImplementation()
 
     // 跳转前将当前位置压入导航历史栈
     m_navStack.append({ path, ed->currentLine(), ed->currentColumn() });
-    if (m_navStack.size() > 50) m_navStack.removeFirst();
+    if (m_navStack.size() > kMaxNavigationEntries) m_navStack.removeFirst();  // O27
     m_navForwardStack.clear();
 
     // LSP 行列从 0 开始，编辑器从 1 开始
@@ -4084,7 +4130,7 @@ void Widget::navigateForward()
         MyTextEdit* ed = qobject_cast<MyTextEdit*>(m_currentTextEdit->asWidget());
         if (ed) {
             m_navStack.append({ m_tabBar->currentFilePath(), ed->currentLine(), ed->currentColumn() });
-            if (m_navStack.size() > 50) m_navStack.removeFirst();
+            if (m_navStack.size() > kMaxNavigationEntries) m_navStack.removeFirst();  // O27
         }
     }
 

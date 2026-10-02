@@ -41,6 +41,7 @@ public:
     int fontSize() const;
     QString theme() const;
     bool autoSave() const;
+    int autoSaveInterval() const;  // O29: 自动保存间隔（秒，5~3600，默认 30）
     QString windowGeometry() const;
     bool showCompletion() const;
 
@@ -48,6 +49,7 @@ public:
     void setFontSize(int size);
     void setTheme(const QString& theme);
     void setAutoSave(bool enable);
+    void setAutoSaveInterval(int seconds);  // O29: 自动保存间隔（秒）
     void setWindowGeometry(const QString& geometry);
     void setShowCompletion(bool show);
 

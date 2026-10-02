@@ -348,6 +348,9 @@ private:
     /// C03-6: 标记下一次 onLspDefinitionReady 为预览请求（不跳转，显示弹窗）
     bool m_pendingDefinitionPreview = false;
 
+    // O27: 导航栈深度上限（防止跳转历史无限增长，与持久化恢复截断共用）
+    static constexpr int kMaxNavigationEntries = 50;
+
     // J2: 代码导航历史栈 — 跳转定义前 push 当前位置，Ctrl+← pop 回退
     struct NavigationEntry {
         QString filePath;  // 文件路径

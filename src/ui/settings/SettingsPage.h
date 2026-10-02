@@ -54,6 +54,7 @@ private slots:
     void onThemeChanged(int index);
     void onFontSizeChanged(int value);
     void onAutoSaveToggled(bool checked);
+    void onAutoSaveIntervalChanged(int value);  // O29: 自动保存间隔（秒）
     void onCompletionToggled(bool checked);
     void onLineNumbersToggled(bool checked);
     void onTabSizeChanged(int value);
@@ -157,6 +158,7 @@ private:
 
     // === 编辑器配置 ===
     QCheckBox* m_autoSaveCheck;
+    QSpinBox*  m_autoSaveIntervalSpin;  // O29: 自动保存间隔（秒）
     QCheckBox* m_lineNumbersCheck;
     QSpinBox*  m_tabSizeSpin;
     QComboBox* m_indentStyleCombo;       // M4: 缩进风格 (Spaces/Tabs)

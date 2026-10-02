@@ -9,6 +9,10 @@
 #include <QDateTime>
 #include <QTimer>
 #include <QSet>
+#include <QHash>
+#include <QPointer>
+
+class QPropertyAnimation;
 
 #include "interfaces/ui/ITabWidget.h"
 
@@ -128,6 +132,13 @@ public:
     /// @brief 刷新所有编辑器（主题切换后行号区重绘等）
     void refreshAllEditors();
 
+    /// O24: 分离窗口跟踪 — 当前存活的拖出独立窗口数量
+    int detachedWindowCount() const;
+
+    /// O24: 关闭所有分离窗口（退出前收口，逐个做保存检查）
+    /// @return false = 用户在保存确认中取消，调用方应中止关闭流程
+    bool closeAllDetachedWindows();
+
 signals:
     /// @brief 当前编辑器变更信号（用于重新连接补全器等）
     void currentEditorChanged(MyTextEdit* editor);
@@ -146,6 +157,9 @@ signals:
 
     /// @brief 文件标签页关闭（通知 LSP 发送 didClose 释放文档）
     void fileClosed(const QString& filePath);
+
+    /// O24: 分离窗口保存请求 — 按记录路径直接写盘（不经主窗口当前标签路径）
+    void saveDetachedRequested(MyTextEdit* editor, const QString& filePath);
 
     // R4: 闲置检测信号已移到 IdleTabTracker（fileIdleTimeout/fileReactivated）
 
@@ -179,6 +193,22 @@ private:
     bool m_dragging = false;           // 是否正在拖拽标签
     int m_dragTabIndex = -1;           // 被拖拽的标签索引
     QPoint m_dragStartPos;             // 拖拽起始位置
+
+    // === O23: 标签切换淡入动画缓存（widget → 动画对象，动画父对象为其透明度效果）===
+    QHash<QWidget*, QPropertyAnimation*> m_tabAnimCache;
+
+    // === O24: 分离窗口跟踪 ===
+    struct DetachedWindowRecord {
+        QPointer<QWidget> window;        ///< 分离的独立窗口（WA_DeleteOnClose）
+        QPointer<QWidget> editor;        ///< 普通编辑器标签的 MyTextEdit（cpp 内 qobject_cast）
+        QPointer<QWidget> customWidget;  ///< 特殊标签（MarkdownMode 等，内嵌编辑器）
+        QString filePath;                ///< 原文件路径（空 = 未命名）
+        QString displayName;             ///< 标签显示名
+    };
+    QList<DetachedWindowRecord> m_detachedWindows;
+
+    /// O24: 清理已销毁窗口的跟踪记录
+    void pruneDetachedRecords();
 };
 
 #endif // EDITORTABBAR_H

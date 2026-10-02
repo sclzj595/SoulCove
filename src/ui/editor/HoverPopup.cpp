@@ -498,6 +498,12 @@ QString HoverPopup::generateStylesheet() const
     // 根据当前主题选择配色（通过编辑器背景亮度判断暗色/亮色主题）
     const auto& palette = ThemeManager::instance().currentPalette();
     bool isDark = palette.bgEditor.lightness() <= 128;
+    // O30: 样式表缓存 — 样式仅由明/暗主题决定，主题不变时直接复用
+    // （原实现每次显示弹窗都重新拼接 40+ 段 QSS 并执行 17 个 .arg()）
+    const QString sig = isDark ? QStringLiteral("dark") : QStringLiteral("light");
+    if (m_styleSig == sig && !m_cachedStylesheet.isEmpty()) {
+        return m_cachedStylesheet;
+    }
     QString bgColor = isDark ? QStringLiteral("#1e1e1e") : QStringLiteral("#ffffff");
     QString fgColor = isDark ? QStringLiteral("#d4d4d4") : QStringLiteral("#333333");
     QString borderColor = isDark ? QStringLiteral("#3c3c3c") : QStringLiteral("#cccccc");
@@ -520,7 +526,7 @@ QString HoverPopup::generateStylesheet() const
     // H3: 引用块文字颜色 — 弱化前景，与正文区分
     QString quoteColor = isDark ? QStringLiteral("#9aa0a6") : QStringLiteral("#666666");
 
-    return QStringLiteral(
+    QString qss = QStringLiteral(
         "body { "
         "  background-color: %1; "
         "  color: %2; "
@@ -635,6 +641,10 @@ QString HoverPopup::generateStylesheet() const
           borderColor, codeBgColor, codeFgColor, doxyTagColor, linkColor,
           cppKwColor, cppTypeColor, cppStrColor, cppCommentColor, cppPreprocColor,
           quoteColor, cppTodoColor);
+    // O30: 写入缓存（签名与样式表一起更新）
+    m_styleSig = sig;
+    m_cachedStylesheet = qss;
+    return m_cachedStylesheet;
 }
 
 void HoverPopup::adjustSizeToFit()

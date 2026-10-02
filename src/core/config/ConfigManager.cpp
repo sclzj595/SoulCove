@@ -157,6 +157,20 @@ void ConfigManager::setAutoSave(bool enable)
     setValue("Editor/autoSave", enable);
 }
 
+// O29: 自动保存间隔可配置（秒，钳制 5~3600，默认 30）
+int ConfigManager::autoSaveInterval() const
+{
+    bool ok = false;
+    int v = getValue(QStringLiteral("Editor/autoSaveInterval"), 30).toInt(&ok);
+    if (!ok || v < 5) return 30;
+    return qBound(5, v, 3600);
+}
+
+void ConfigManager::setAutoSaveInterval(int seconds)
+{
+    setValue(QStringLiteral("Editor/autoSaveInterval"), qBound(5, seconds, 3600));
+}
+
 void ConfigManager::setWindowGeometry(const QString& geometry)
 {
     setValue("Window/geometry", geometry);

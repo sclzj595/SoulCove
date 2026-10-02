@@ -461,6 +461,23 @@ void EditorTabBar::detachTabToWindow(int index)
     // 窗口关闭时自动清理
     detachedWindow->setAttribute(Qt::WA_DeleteOnClose);
 
+    // O24: 分离窗口跟踪 — 记录窗口与编辑器信息，供退出前保存检查与 LSP didClose 释放
+    {
+        DetachedWindowRecord rec;
+        rec.window = detachedWindow;
+        rec.editor = data.editor;
+        rec.customWidget = data.customWidget;
+        rec.filePath = data.filePath;
+        rec.displayName = data.displayName;
+        connect(detachedWindow, &QObject::destroyed, this,
+                [this, filePath = data.filePath]() {
+            // 分离窗口销毁（手动关闭或退出收口）：清理记录；编辑器标签需释放 LSP 文档
+            if (!filePath.isEmpty()) emit fileClosed(filePath);
+            pruneDetachedRecords();
+        });
+        m_detachedWindows.append(rec);
+    }
+
     // 移动到鼠标当前位置附近
     QPoint globalPos = QCursor::pos();
     detachedWindow->move(globalPos - QPoint(400, 300));
@@ -477,6 +494,60 @@ void EditorTabBar::detachTabToWindow(int index)
     if (m_tabBar->count() == 0) {
         emit allTabsClosed();
     }
+}
+
+// ========== O24: 分离窗口跟踪 ==========
+
+int EditorTabBar::detachedWindowCount() const
+{
+    int count = 0;
+    for (const DetachedWindowRecord& rec : m_detachedWindows) {
+        if (rec.window) ++count;
+    }
+    return count;
+}
+
+void EditorTabBar::pruneDetachedRecords()
+{
+    for (int i = m_detachedWindows.size() - 1; i >= 0; --i) {
+        if (!m_detachedWindows[i].window) {
+            m_detachedWindows.removeAt(i);
+        }
+    }
+}
+
+bool EditorTabBar::closeAllDetachedWindows()
+{
+    // O24: 退出前收口分离窗口 — 逐个保存检查（与 closeTab 同款确认交互）
+    for (int i = m_detachedWindows.size() - 1; i >= 0; --i) {
+        DetachedWindowRecord& rec = m_detachedWindows[i];
+        if (!rec.window) {
+            m_detachedWindows.removeAt(i);
+            continue;
+        }
+
+        // 编辑器有未保存修改 → 确认框（父窗口用分离窗口自身）
+        MyTextEdit* ed = rec.editor ? qobject_cast<MyTextEdit*>(rec.editor.data()) : nullptr;
+        if (!ed && rec.customWidget) {
+            ed = rec.customWidget->findChild<MyTextEdit*>();
+        }
+        if (ed && ed->isModified()) {
+            QString fileName = rec.filePath.isEmpty() ? rec.displayName : rec.filePath;
+            int result = ModernDialog::confirm(rec.window, tr("scNotebook"),
+                tr("分离窗口中的 \"%1\" 有未保存的更改，是否保存？").arg(fileName));
+            if (result == ModernDialog::ROLE_REJECT) {
+                return false;  // 用户取消 → 中止整个关闭流程
+            }
+            if (result == ModernDialog::ROLE_ACCEPT) {
+                emit saveDetachedRequested(ed, rec.filePath);
+                // 另存为被取消等情况 → 修改标记仍在，视为中止
+                if (ed->isModified()) return false;
+            }
+            // 其余（不保存）→ 放弃修改直接关闭
+        }
+        rec.window->close();  // WA_DeleteOnClose → destroyed → didClose + prune
+    }
+    return true;
 }
 
 bool EditorTabBar::closeTab(int index)
@@ -784,12 +855,22 @@ void EditorTabBar::onTabChanged(int index)
                 targetWidget->setGraphicsEffect(effect);
             }
             effect->setOpacity(0.0);
-            auto* anim = new QPropertyAnimation(effect, "opacity");
-            anim->setDuration(150);
-            anim->setStartValue(0.0);
-            anim->setEndValue(1.0);
-            anim->setEasingCurve(QEasingCurve::OutCubic);
-            connect(anim, &QPropertyAnimation::finished, anim, &QPropertyAnimation::deleteLater);
+            // O23: 动画对象缓存 — 每 widget 仅创建一次，切换时复用重启
+            // （原实现每次切换 new 一个 QPropertyAnimation + deleteLater，高频切换产生对象 churn）
+            QPropertyAnimation* anim = m_tabAnimCache.value(targetWidget, nullptr);
+            if (!anim) {
+                anim = new QPropertyAnimation(effect, "opacity", effect);
+                anim->setDuration(150);
+                anim->setStartValue(0.0);
+                anim->setEndValue(1.0);
+                anim->setEasingCurve(QEasingCurve::OutCubic);
+                m_tabAnimCache.insert(targetWidget, anim);
+                // widget 销毁时清理缓存（动画父对象为 effect，随之销毁，无泄漏）
+                connect(targetWidget, &QObject::destroyed, this, [this](QObject* obj) {
+                    m_tabAnimCache.remove(static_cast<QWidget*>(obj));
+                });
+            }
+            anim->stop();
             anim->start();
         }
     } else if (m_tabBar->count() == 0) {
