@@ -505,6 +505,36 @@ bool SftpClient::writeFile(const QString& remotePath, const QByteArray& data)
 }
 
 // ============================================================
+// P3-M01 子项1: 远程文件 mtime 查询（缓存一致性校验）
+// ============================================================
+
+QDateTime SftpClient::fileMtime(const QString& remotePath)
+{
+    if (!isAvailable()) {
+        setError(QStringLiteral("SFTP 未初始化"));
+        return QDateTime();
+    }
+
+    LIBSSH2_SESSION* session = m_sshClient->rawSession();
+    ScopedBlocking guard(session);
+
+    LIBSSH2_SFTP_ATTRIBUTES attrs;
+    int rc = libssh2_sftp_stat(m_sftp, remotePath.toUtf8().constData(), &attrs);
+    if (rc != 0) {
+        unsigned long sftpErr = libssh2_sftp_last_error(m_sftp);
+        setError(QStringLiteral("获取文件属性失败: %1 (SFTP错误码: %2)")
+                 .arg(remotePath).arg(sftpErr));
+        return QDateTime();
+    }
+
+    if (attrs.flags & LIBSSH2_SFTP_ATTR_ACMODTIME) {
+        // SFTP mtime 为秒级时间戳
+        return QDateTime::fromSecsSinceEpoch(static_cast<qint64>(attrs.mtime));
+    }
+    return QDateTime();
+}
+
+// ============================================================
 // 私有辅助
 // ============================================================
 

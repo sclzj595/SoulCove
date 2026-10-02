@@ -85,6 +85,10 @@ public:
     /// @brief 发送 textDocument/didOpen 通知（打开文档）
     virtual void openDocument(const QString& uri, const QString& text, const QString& langId) = 0;
 
+    /// @brief L3: 发送 textDocument/didClose 通知（关闭文档）
+    /// 避免闲置标签重新激活时重复 didOpen 导致 clangd 重建 preamble
+    virtual void closeDocument(const QString& uri) = 0;
+
     /// @brief 发送 textDocument/didChange 通知（全文变更）
     virtual void changeDocument(const QString& uri, const QString& fullText) = 0;
 
@@ -104,6 +108,10 @@ public:
 
     /// @brief 请求引用查找
     virtual void requestReferences(const QString& uri, int line, int col) = 0;
+
+    /// @brief P0 C03: 请求跳转实现（textDocument/implementation）
+    /// 响应格式与 definition 相同，复用 definitionReady 信号
+    virtual void requestImplementation(const QString& uri, int line, int col) = 0;
 
     /// @brief 请求文档符号列表（用于语义高亮 / 大纲视图）
     virtual void requestSymbols(const QString& uri) = 0;
@@ -132,7 +140,9 @@ signals:
     void definitionReady(const QString& uri, int line, int col);
     void hoverReady(const QString& documentation, const QPoint& pos);
     void diagnosticsReady(const QString& uri, const QList<LspDiagnostic>& diagnostics);
-    void symbolsReady(const QList<QVariantMap>& symbols);
+    /// V2.1 C1 修复：增加 uri 参数，按 requestId 精确路由响应文件
+    /// 避免共享 m_currentRequestFile 导致跨请求类型响应归属错误
+    void symbolsReady(const QString& uri, const QList<QVariantMap>& symbols);
     /// L17: 引用查找结果（每个 QVariantMap 包含 uri/range，与 LSP Location 结构一致）
     void referencesReady(const QList<QVariantMap>& references);
 };

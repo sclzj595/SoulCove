@@ -1,7 +1,11 @@
 #include "ui/settings/SettingsPage.h"
 #include "core/config/ThemeManager.h"
 #include "core/config/ConfigManager.h"
+#include "core/i18n/I18nManager.h"  // P3-M05: 语言切换
 #include "core/shortcut/ShortcutManager.h"  // T7: 快捷键管理器
+#include "core/build/QtDetector.h"          // P1 C05-3: Qt 安装检测器
+#include "ui/snippet/SnippetManagerDialog.h"  // P2-H02 子项1: 代码片段管理对话框
+#include "ui/shortcut/KeySequenceEdit.h"    // P2-H05 子项3: 按键录制输入框
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -10,6 +14,10 @@
 #include <QScrollArea>
 #include "ui/dialog/ModernDialog.h"
 #include <QFileDialog>
+#include <QDir>
+#include <QFile>
+#include <QInputDialog>   // C05-3: 自动检测 Qt 选择对话框
+#include <QMessageBox>    // C05-3: 检测结果提示
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -17,6 +25,7 @@
 #include <QDialog>
 #include <QKeyEvent>
 #include <QHeaderView>
+#include <QPointer>   // P2-H05 子项3: KeySequenceEdit 生命周期守卫
 
 SettingsPage::SettingsPage(QWidget* parent)
     : QWidget(parent)
@@ -36,6 +45,20 @@ SettingsPage::SettingsPage(QWidget* parent)
                 m_fontSizeSpin->setValue(size);
             }
         }
+    });
+
+    // J3: 监听主题切换 — 切换主题后重新应用快捷键页面样式，修复表格不刷新 bug
+    connect(&ThemeManager::instance(), &ThemeManager::themeChanged,
+            this, [this](const QString&) {
+        applyShortcutPageTheme();
+    });
+
+    // Bug5: 搜索防抖定时器 — 150ms 防抖，避免每次按键同步全量过滤导致主线程阻塞/白屏
+    m_searchDebounceTimer = new QTimer(this);
+    m_searchDebounceTimer->setSingleShot(true);
+    m_searchDebounceTimer->setInterval(150);
+    connect(m_searchDebounceTimer, &QTimer::timeout, this, [this]() {
+        filterSettings(m_pendingKeyword);
     });
 }
 
@@ -64,6 +87,12 @@ void SettingsPage::setupUI()
     m_categoryList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_categoryList->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_categoryList->setFrameShape(QFrame::NoFrame);
+    // P3-M05: 分类列表项设置最小高度，防止不同语言切换时项高度跳变
+    m_categoryList->setIconSize(QSize(16, 16));
+    // 通过 QSS 设置 item padding 提高最小高度（语言切换时保持稳定布局）
+    m_categoryList->setStyleSheet(QStringLiteral(
+        "QListWidget#sideFileList::item { padding: 8px 12px; min-height: 28px; }"
+    ));
 
     m_categoryList->addItem(tr("外观"));
     m_categoryList->addItem(tr("编辑器"));
@@ -71,6 +100,8 @@ void SettingsPage::setupUI()
     m_categoryList->addItem(tr("智能提示"));
     m_categoryList->addItem(tr("快捷键"));
     m_categoryList->addItem(tr("LSP 语言服务器"));
+    m_categoryList->addItem(tr("构建配置"));   // P1 C05-2
+    m_categoryList->addItem(tr("Markdown"));   // P3-M02 子项2
     m_categoryList->setCurrentRow(0);
 
     navLayout->addWidget(m_categoryList);
@@ -115,6 +146,14 @@ void SettingsPage::setupUI()
     auto* lspPage = new QWidget();
     createLspPage(lspPage);
 
+    // P1 C05-2: 构建配置页
+    auto* buildPage = new QWidget();
+    createBuildPage(buildPage);
+
+    // P3-M02 子项2: Markdown 自定义 CSS 配置页
+    auto* markdownPage = new QWidget();
+    createMarkdownPage(markdownPage);
+
     m_pageStack->addWidget(appearancePage);
     m_pageStack->addWidget(editorPage);
     m_pageStack->addWidget(terminalPage);
@@ -122,10 +161,12 @@ void SettingsPage::setupUI()
 
     // 快捷键页面（独立创建，返回 QWidget 指针）
     // 注意：添加顺序必须与 m_categoryList 的项目顺序一致
-    // 分类列表顺序：外观(0) 编辑器(1) 终端(2) 智能提示(3) 快捷键(4) LSP(5)
+    // 分类列表顺序：外观(0) 编辑器(1) 终端(2) 智能提示(3) 快捷键(4) LSP(5) 构建(6) Markdown(7)
     createShortcutsPage();
 
     m_pageStack->addWidget(lspPage);
+    m_pageStack->addWidget(buildPage);
+    m_pageStack->addWidget(markdownPage);
 
     // 用滚动区域包裹
     auto* scrollArea = new QScrollArea(this);
@@ -149,6 +190,14 @@ void SettingsPage::setupUI()
             this, &SettingsPage::onExportConfig);
     connect(m_btnImportConfig, &QPushButton::clicked,
             this, &SettingsPage::onImportConfig);
+
+    // P3-M05: 长文本提示标签启用自动换行，适配不同语言（英文偏长，中文偏短）
+    // 遍历所有 settingsHint QLabel，统一开启 wordWrap，避免英文字符串溢出截断
+    QList<QLabel*> hintLabels = findChildren<QLabel*>(QStringLiteral("settingsHint"));
+    for (QLabel* lbl : hintLabels) {
+        lbl->setWordWrap(true);
+        lbl->setMinimumHeight(0);  // 允许布局自适应
+    }
 }
 
 void SettingsPage::createAppearancePage(QWidget* page)
@@ -347,6 +396,14 @@ void SettingsPage::createEditorPage(QWidget* page)
     jsonFormatHint->setObjectName(QStringLiteral("settingsHint"));
     layout->addWidget(jsonFormatHint);
 
+    // --- 拼写检查 (P3-M03 子项5) ---
+    m_spellCheckCheck = new QCheckBox(tr("启用拼写检查"), page);
+    layout->addWidget(m_spellCheckCheck);
+
+    auto* spellHint = new QLabel(tr("对英文单词进行拼写检查，错误的单词以红色波浪线标注；右键可查看建议或加入词典"), page);
+    spellHint->setObjectName(QStringLiteral("settingsHint"));
+    layout->addWidget(spellHint);
+
     layout->addStretch();
 
     // 信号
@@ -362,6 +419,8 @@ void SettingsPage::createEditorPage(QWidget* page)
             this, &SettingsPage::onFormatToolPathClicked);
     connect(m_autoFormatJsonCheck, &QCheckBox::toggled,
             this, &SettingsPage::onAutoFormatJsonToggled);
+    connect(m_spellCheckCheck, &QCheckBox::toggled,
+            this, &SettingsPage::onSpellCheckToggled);
 }
 
 void SettingsPage::createTerminalPage(QWidget* page)
@@ -633,6 +692,27 @@ void SettingsPage::createCompletionPage(QWidget* page)
     matchHint->setObjectName(QStringLiteral("settingsHint"));
     layout->addWidget(matchHint);
 
+    // --- 代码片段（P2-H02 子项1：入口按钮）---
+    auto* snippetSection = new QLabel(tr("代码片段"), page);
+    snippetSection->setObjectName(QStringLiteral("settingsSectionTitle"));
+    layout->addWidget(snippetSection);
+
+    auto* snippetLayout = new QHBoxLayout();
+    auto* snippetHint = new QLabel(tr("管理常用代码模板，支持占位符与 VSCode 格式导入导出"), page);
+    snippetHint->setObjectName(QStringLiteral("settingsHint"));
+    snippetHint->setWordWrap(true);
+    snippetLayout->addWidget(snippetHint, 1);
+    auto* btnSnippetManage = new QPushButton(tr("管理代码片段..."), page);
+    btnSnippetManage->setObjectName(QStringLiteral("btnSnippetManage"));
+    snippetLayout->addWidget(btnSnippetManage);
+    layout->addLayout(snippetLayout);
+
+    // 点击弹出片段管理对话框
+    connect(btnSnippetManage, &QPushButton::clicked, page, [page]() {
+        SnippetManagerDialog dlg(page);
+        dlg.exec();
+    });
+
     layout->addStretch();
 
     // 信号
@@ -887,6 +967,385 @@ private:
 };
 
 // ============================================================
+// P1 C05-2: 构建设置页面创建
+// ============================================================
+
+void SettingsPage::createBuildPage(QWidget* page)
+{
+    auto* layout = new QVBoxLayout(page);
+    layout->setContentsMargins(28, 24, 28, 24);
+    layout->setSpacing(12);
+
+    auto* titleLabel = new QLabel(tr("构建配置"), page);
+    titleLabel->setObjectName(QStringLiteral("settingsMainTitle"));
+    layout->addWidget(titleLabel);
+
+    auto* hintLabel = new QLabel(tr("配置 CMake 构建所需的 Qt/OpenSSL/zlib 路径与构建类型。这些路径对应 CMakeLists.txt 中的 CMAKE_PREFIX_PATH / OPENSSL_ROOT_DIR / ZLIB_ROOT 环境变量"), page);
+    hintLabel->setObjectName(QStringLiteral("settingsHint"));
+    hintLabel->setWordWrap(true);
+    layout->addWidget(hintLabel);
+
+    // --- Qt 安装路径 ---
+    auto* qtSection = new QLabel(tr("Qt 安装路径"), page);
+    qtSection->setObjectName(QStringLiteral("settingsSectionTitle"));
+    layout->addWidget(qtSection);
+
+    auto* qtLayout = new QHBoxLayout();
+    auto* qtLabel = new QLabel(tr("Qt 路径:"), page);
+    qtLabel->setFixedWidth(120);
+    m_buildQtPathLabel = new QLabel(tr("(使用环境变量 CMAKE_PREFIX_PATH)"), page);
+    m_buildQtPathLabel->setObjectName(QStringLiteral("settingsHint"));
+    m_buildQtPathLabel->setWordWrap(true);
+    m_buildQtPathBtn = new QPushButton(tr("浏览..."), page);
+    m_buildQtPathBtn->setObjectName(QStringLiteral("btnResetSection"));
+    m_buildQtPathBtn->setFixedWidth(80);
+    m_buildAutoDetectBtn = new QPushButton(tr("自动检测"), page);  // C05-3
+    m_buildAutoDetectBtn->setObjectName(QStringLiteral("btnResetSection"));
+    m_buildAutoDetectBtn->setFixedWidth(80);
+    qtLayout->addWidget(qtLabel);
+    qtLayout->addWidget(m_buildQtPathLabel, 1);
+    qtLayout->addWidget(m_buildQtPathBtn);
+    qtLayout->addWidget(m_buildAutoDetectBtn);
+    qtLayout->addStretch();
+    layout->addLayout(qtLayout);
+
+    auto* qtHint = new QLabel(tr("Qt 安装根目录（如 .../6.5.3/mingw_64），对应 CMAKE_PREFIX_PATH。留空则使用环境变量"), page);
+    qtHint->setObjectName(QStringLiteral("settingsHint"));
+    qtHint->setWordWrap(true);
+    layout->addWidget(qtHint);
+
+    // --- OpenSSL 路径 ---
+    auto* sslSection = new QLabel(tr("OpenSSL 路径"), page);
+    sslSection->setObjectName(QStringLiteral("settingsSectionTitle"));
+    layout->addWidget(sslSection);
+
+    auto* sslLayout = new QHBoxLayout();
+    auto* sslLabel = new QLabel(tr("OpenSSL 路径:"), page);
+    sslLabel->setFixedWidth(120);
+    m_buildOpenSslPathLabel = new QLabel(tr("(使用环境变量 OPENSSL_ROOT_DIR)"), page);
+    m_buildOpenSslPathLabel->setObjectName(QStringLiteral("settingsHint"));
+    m_buildOpenSslPathLabel->setWordWrap(true);
+    m_buildOpenSslPathBtn = new QPushButton(tr("浏览..."), page);
+    m_buildOpenSslPathBtn->setObjectName(QStringLiteral("btnResetSection"));
+    m_buildOpenSslPathBtn->setFixedWidth(80);
+    sslLayout->addWidget(sslLabel);
+    sslLayout->addWidget(m_buildOpenSslPathLabel, 1);
+    sslLayout->addWidget(m_buildOpenSslPathBtn);
+    sslLayout->addStretch();
+    layout->addLayout(sslLayout);
+
+    auto* sslHint = new QLabel(tr("OpenSSL 安装根目录，对应 OPENSSL_ROOT_DIR。留空则使用环境变量"), page);
+    sslHint->setObjectName(QStringLiteral("settingsHint"));
+    sslHint->setWordWrap(true);
+    layout->addWidget(sslHint);
+
+    // --- zlib 路径 ---
+    auto* zlibSection = new QLabel(tr("zlib 路径"), page);
+    zlibSection->setObjectName(QStringLiteral("settingsSectionTitle"));
+    layout->addWidget(zlibSection);
+
+    auto* zlibLayout = new QHBoxLayout();
+    auto* zlibLabel = new QLabel(tr("zlib 路径:"), page);
+    zlibLabel->setFixedWidth(120);
+    m_buildZlibPathLabel = new QLabel(tr("(使用环境变量 ZLIB_ROOT)"), page);
+    m_buildZlibPathLabel->setObjectName(QStringLiteral("settingsHint"));
+    m_buildZlibPathLabel->setWordWrap(true);
+    m_buildZlibPathBtn = new QPushButton(tr("浏览..."), page);
+    m_buildZlibPathBtn->setObjectName(QStringLiteral("btnResetSection"));
+    m_buildZlibPathBtn->setFixedWidth(80);
+    zlibLayout->addWidget(zlibLabel);
+    zlibLayout->addWidget(m_buildZlibPathLabel, 1);
+    zlibLayout->addWidget(m_buildZlibPathBtn);
+    zlibLayout->addStretch();
+    layout->addLayout(zlibLayout);
+
+    auto* zlibHint = new QLabel(tr("zlib 安装根目录（含 lib/libz.a），对应 ZLIB_ROOT。留空则使用环境变量"), page);
+    zlibHint->setObjectName(QStringLiteral("settingsHint"));
+    zlibHint->setWordWrap(true);
+    layout->addWidget(zlibHint);
+
+    // --- 构建类型 ---
+    auto* typeSection = new QLabel(tr("构建类型"), page);
+    typeSection->setObjectName(QStringLiteral("settingsSectionTitle"));
+    layout->addWidget(typeSection);
+
+    auto* typeLayout = new QHBoxLayout();
+    auto* typeLabel = new QLabel(tr("构建类型:"), page);
+    typeLabel->setFixedWidth(120);
+    m_buildTypeCombo = new QComboBox(page);
+    m_buildTypeCombo->addItem(tr("Debug"), QStringLiteral("Debug"));
+    m_buildTypeCombo->addItem(tr("Release"), QStringLiteral("Release"));
+    m_buildTypeCombo->addItem(tr("RelWithDebInfo"), QStringLiteral("RelWithDebInfo"));
+    typeLayout->addWidget(typeLabel);
+    typeLayout->addWidget(m_buildTypeCombo, 1);
+    typeLayout->addStretch();
+    layout->addLayout(typeLayout);
+
+    auto* typeHint = new QLabel(tr("对应 CMAKE_BUILD_TYPE，单配置生成器（如 MinGW Makefiles）使用；多配置生成器（如 Ninja Multi-Config）忽略"), page);
+    typeHint->setObjectName(QStringLiteral("settingsHint"));
+    typeHint->setWordWrap(true);
+    layout->addWidget(typeHint);
+
+    // --- 构建目录 (C05-4) ---
+    auto* dirSection = new QLabel(tr("构建目录"), page);
+    dirSection->setObjectName(QStringLiteral("settingsSectionTitle"));
+    layout->addWidget(dirSection);
+
+    auto* dirLayout = new QHBoxLayout();
+    auto* dirLabel = new QLabel(tr("构建目录:"), page);
+    dirLabel->setFixedWidth(120);
+    m_buildDirLabel = new QLabel(tr("(默认 build)"), page);
+    m_buildDirLabel->setObjectName(QStringLiteral("settingsHint"));
+    m_buildDirLabel->setWordWrap(true);
+    m_buildDirBtn = new QPushButton(tr("浏览..."), page);
+    m_buildDirBtn->setObjectName(QStringLiteral("btnResetSection"));
+    m_buildDirBtn->setFixedWidth(80);
+    dirLayout->addWidget(dirLabel);
+    dirLayout->addWidget(m_buildDirLabel, 1);
+    dirLayout->addWidget(m_buildDirBtn);
+    dirLayout->addStretch();
+    layout->addLayout(dirLayout);
+
+    auto* dirHint = new QLabel(tr("CMake 构建输出目录。留空则使用项目下的 build 目录"), page);
+    dirHint->setObjectName(QStringLiteral("settingsHint"));
+    dirHint->setWordWrap(true);
+    layout->addWidget(dirHint);
+
+    m_buildSeparateDirsCheck = new QCheckBox(tr("按构建类型分离目录（build/Debug、build/Release 各自独立）"), page);
+    layout->addWidget(m_buildSeparateDirsCheck);
+
+    auto* separateHint = new QLabel(tr("勾选后每种构建类型使用独立子目录，避免 Debug/Release 切换时反复 reconfigure"), page);
+    separateHint->setObjectName(QStringLiteral("settingsHint"));
+    separateHint->setWordWrap(true);
+    layout->addWidget(separateHint);
+
+    // --- 编译器路径 (P1 C05-2) ---
+    auto* compilerSection = new QLabel(tr("编译器"), page);
+    compilerSection->setObjectName(QStringLiteral("settingsSectionTitle"));
+    layout->addWidget(compilerSection);
+
+    auto* compilerTypeLayout = new QHBoxLayout();
+    auto* compilerTypeLabel = new QLabel(tr("编译器类型:"), page);
+    compilerTypeLabel->setFixedWidth(120);
+    m_buildCompilerCombo = new QComboBox(page);
+    m_buildCompilerCombo->addItem(tr("MinGW (GCC)"), QStringLiteral("mingw"));
+    m_buildCompilerCombo->addItem(tr("MSVC"), QStringLiteral("msvc"));
+    compilerTypeLayout->addWidget(compilerTypeLabel);
+    compilerTypeLayout->addWidget(m_buildCompilerCombo, 1);
+    compilerTypeLayout->addStretch();
+    layout->addLayout(compilerTypeLayout);
+
+    auto* compilerPathLayout = new QHBoxLayout();
+    auto* compilerPathLabel = new QLabel(tr("编译器路径:"), page);
+    compilerPathLabel->setFixedWidth(120);
+    m_buildCompilerPathLabel = new QLabel(tr("(使用系统默认)"), page);
+    m_buildCompilerPathLabel->setObjectName(QStringLiteral("settingsHint"));
+    m_buildCompilerPathLabel->setWordWrap(true);
+    m_buildCompilerPathBtn = new QPushButton(tr("浏览..."), page);
+    m_buildCompilerPathBtn->setObjectName(QStringLiteral("btnResetSection"));
+    m_buildCompilerPathBtn->setFixedWidth(80);
+    compilerPathLayout->addWidget(compilerPathLabel);
+    compilerPathLayout->addWidget(m_buildCompilerPathLabel, 1);
+    compilerPathLayout->addWidget(m_buildCompilerPathBtn);
+    compilerPathLayout->addStretch();
+    layout->addLayout(compilerPathLayout);
+
+    auto* compilerHint = new QLabel(tr("MinGW/MSVC 编译器路径，留空则使用系统默认编译器"), page);
+    compilerHint->setObjectName(QStringLiteral("settingsHint"));
+    compilerHint->setWordWrap(true);
+    layout->addWidget(compilerHint);
+
+    // --- CMake 额外参数 (P1 C05-2) ---
+    auto* cmakeArgsSection = new QLabel(tr("CMake 额外参数"), page);
+    cmakeArgsSection->setObjectName(QStringLiteral("settingsSectionTitle"));
+    layout->addWidget(cmakeArgsSection);
+
+    auto* cmakeArgsLayout = new QHBoxLayout();
+    auto* cmakeArgsLabel = new QLabel(tr("额外参数:"), page);
+    cmakeArgsLabel->setFixedWidth(120);
+    m_buildCmakeArgsEdit = new QLineEdit(page);
+    m_buildCmakeArgsEdit->setPlaceholderText(tr("如 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"));
+    cmakeArgsLayout->addWidget(cmakeArgsLabel);
+    cmakeArgsLayout->addWidget(m_buildCmakeArgsEdit, 1);
+    layout->addLayout(cmakeArgsLayout);
+
+    auto* cmakeArgsHint = new QLabel(tr("传递给 CMake 的额外参数，多个参数用空格分隔"), page);
+    cmakeArgsHint->setObjectName(QStringLiteral("settingsHint"));
+    cmakeArgsHint->setWordWrap(true);
+    layout->addWidget(cmakeArgsHint);
+
+    // --- 应用并重新配置 (P1 C05-2) ---
+    auto* applyLayout = new QHBoxLayout();
+    m_buildApplyBtn = new QPushButton(tr("应用并重新配置"), page);
+    m_buildApplyBtn->setObjectName(QStringLiteral("btnResetSection"));
+    applyLayout->addWidget(m_buildApplyBtn);
+    applyLayout->addStretch();
+    layout->addLayout(applyLayout);
+
+    auto* applyHint = new QLabel(tr("写入配置文件并提示重启生效。重新配置需在终端手动执行 cmake 命令"), page);
+    applyHint->setObjectName(QStringLiteral("settingsHint"));
+    applyHint->setWordWrap(true);
+    layout->addWidget(applyHint);
+
+    layout->addStretch();
+
+    // 信号
+    connect(m_buildQtPathBtn, &QPushButton::clicked, this, &SettingsPage::onBuildQtPathClicked);
+    connect(m_buildAutoDetectBtn, &QPushButton::clicked, this, &SettingsPage::onBuildAutoDetectQt);  // C05-3
+    connect(m_buildOpenSslPathBtn, &QPushButton::clicked, this, &SettingsPage::onBuildOpenSslPathClicked);
+    connect(m_buildZlibPathBtn, &QPushButton::clicked, this, &SettingsPage::onBuildZlibPathClicked);
+    connect(m_buildTypeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &SettingsPage::onBuildTypeChanged);
+    connect(m_buildDirBtn, &QPushButton::clicked, this, &SettingsPage::onBuildDirClicked);  // C05-4
+    connect(m_buildSeparateDirsCheck, &QCheckBox::toggled, this, &SettingsPage::onBuildSeparateDirsToggled);  // C05-4
+    connect(m_buildCompilerPathBtn, &QPushButton::clicked, this, &SettingsPage::onBuildCompilerPathClicked);
+    connect(m_buildApplyBtn, &QPushButton::clicked, this, &SettingsPage::onBuildApplyReconfigure);
+}
+
+// ============================================================
+// P3-M02 子项2: Markdown 自定义 CSS 配置页
+// ============================================================
+
+void SettingsPage::createMarkdownPage(QWidget* page)
+{
+    auto* layout = new QVBoxLayout(page);
+    layout->setContentsMargins(28, 24, 28, 24);
+    layout->setSpacing(12);
+
+    auto* titleLabel = new QLabel(tr("Markdown 预览样式"), page);
+    titleLabel->setObjectName(QStringLiteral("settingsMainTitle"));
+    layout->addWidget(titleLabel);
+
+    auto* hintLabel = new QLabel(tr(
+        "自定义 Markdown 预览区的 CSS 样式表。用户 CSS 会叠加在主题预设（暗色/浅色）之上，"
+        "优先级更高。可用于调整字体、颜色、间距、代码块样式等。"), page);
+    hintLabel->setObjectName(QStringLiteral("settingsHint"));
+    hintLabel->setWordWrap(true);
+    layout->addWidget(hintLabel);
+
+    // --- CSS 编辑区 ---
+    auto* cssSection = new QLabel(tr("自定义 CSS"), page);
+    cssSection->setObjectName(QStringLiteral("settingsSectionTitle"));
+    layout->addWidget(cssSection);
+
+    m_mdCssEdit = new QPlainTextEdit(page);
+    m_mdCssEdit->setObjectName(QStringLiteral("mdCssEdit"));
+    m_mdCssEdit->setPlaceholderText(tr(
+        "在此输入自定义 CSS，例如：\n"
+        "body { font-size: 16px; }\n"
+        "pre { background-color: #f5f5f5; }\n"
+        "h1 { color: #ff6600; }"));
+    // 等宽字体，便于编辑 CSS
+    QFont monoFont(QStringLiteral("Consolas"), 10);
+    monoFont.setStyleHint(QFont::Monospace);
+    m_mdCssEdit->setFont(monoFont);
+    // 行高自适应，最小可视区域
+    m_mdCssEdit->setMinimumHeight(240);
+    layout->addWidget(m_mdCssEdit, 1);
+
+    auto* cssHint = new QLabel(tr(
+        "提示：留空则仅使用主题预设 CSS（暗色/浅色自动切换）。"
+        "修改后点击「应用」即时生效，所有打开的 Markdown 文档预览会自动刷新。"), page);
+    cssHint->setObjectName(QStringLiteral("settingsHint"));
+    cssHint->setWordWrap(true);
+    layout->addWidget(cssHint);
+
+    // --- 按钮区 ---
+    auto* btnLayout = new QHBoxLayout();
+    m_mdCssApplyBtn = new QPushButton(tr("应用"), page);
+    m_mdCssApplyBtn->setObjectName(QStringLiteral("btnResetSection"));
+    m_mdCssApplyBtn->setToolTip(tr("保存 CSS 并刷新所有 Markdown 预览"));
+    m_mdCssImportBtn = new QPushButton(tr("从文件导入..."), page);
+    m_mdCssImportBtn->setObjectName(QStringLiteral("btnResetSection"));
+    m_mdCssImportBtn->setToolTip(tr("从 .css 文件导入样式表到编辑区"));
+    m_mdCssResetBtn = new QPushButton(tr("重置"), page);
+    m_mdCssResetBtn->setObjectName(QStringLiteral("btnResetSection"));
+    m_mdCssResetBtn->setToolTip(tr("清空用户 CSS，恢复使用主题预设"));
+    btnLayout->addWidget(m_mdCssApplyBtn);
+    btnLayout->addWidget(m_mdCssImportBtn);
+    btnLayout->addWidget(m_mdCssResetBtn);
+    btnLayout->addStretch();
+    layout->addLayout(btnLayout);
+
+    layout->addStretch();
+
+    // 信号连接
+    connect(m_mdCssApplyBtn, &QPushButton::clicked, this, &SettingsPage::onMdCssApplyClicked);
+    connect(m_mdCssImportBtn, &QPushButton::clicked, this, &SettingsPage::onMdCssImportClicked);
+    connect(m_mdCssResetBtn, &QPushButton::clicked, this, &SettingsPage::onMdCssResetClicked);
+}
+
+// ============================================================
+// P3-M02 子项2: Markdown CSS 槽函数
+// ============================================================
+
+void SettingsPage::onMdCssApplyClicked()
+{
+    if (!m_mdCssEdit) return;
+    QString css = m_mdCssEdit->toPlainText();
+    // 通过 ConfigManager 持久化（会触发 configChanged 信号，MarkdownMode 监听后自动刷新预览）
+    ConfigManager::instance().setMarkdownCustomCss(css);
+    emit configChanged();
+    ModernDialog::information(
+        this,
+        tr("已应用"),
+        tr("Markdown 自定义 CSS 已应用，预览将自动刷新。")
+    );
+}
+
+void SettingsPage::onMdCssImportClicked()
+{
+    if (!m_mdCssEdit) return;
+    QString path = QFileDialog::getOpenFileName(
+        this,
+        tr("导入 CSS 文件"),
+        QStringLiteral(""),
+        tr("CSS 文件 (*.css);;所有文件 (*)")
+    );
+    if (path.isEmpty()) return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        ModernDialog::warning(
+            this,
+            tr("导入失败"),
+            tr("无法打开文件: %1").arg(path)
+        );
+        return;
+    }
+    QString css = QString::fromUtf8(file.readAll());
+    file.close();
+
+    // 加载到编辑区（不立即应用，需用户点击「应用」按钮确认）
+    m_mdCssEdit->setPlainText(css);
+    ModernDialog::information(
+        this,
+        tr("已导入"),
+        tr("CSS 已导入编辑区，点击「应用」按钮生效。")
+    );
+}
+
+void SettingsPage::onMdCssResetClicked()
+{
+    if (!m_mdCssEdit) return;
+    int result = ModernDialog::question(
+        this,
+        tr("重置确认"),
+        tr("确定清空自定义 CSS 并恢复使用主题预设吗？")
+    );
+    if (result != ModernDialog::ROLE_ACCEPT) return;
+
+    m_mdCssEdit->clear();
+    ConfigManager::instance().setMarkdownCustomCss(QString());
+    emit configChanged();
+    ModernDialog::information(
+        this,
+        tr("已重置"),
+        tr("已清空自定义 CSS，预览将使用主题预设。")
+    );
+}
+
+// ============================================================
 // 快捷键设置页面创建
 // ============================================================
 
@@ -902,59 +1361,44 @@ void SettingsPage::createShortcutsPage()
     titleLabel->setObjectName(QStringLiteral("settingsMainTitle"));
     layout->addWidget(titleLabel);
 
-    auto* hintLabel = new QLabel(tr("查看和自定义所有快捷键，系统自动检测冲突"), page);
+    auto* hintLabel = new QLabel(tr("查看和自定义所有快捷键，系统自动检测冲突。双击快捷键单元格进入录制。"), page);
     hintLabel->setObjectName(QStringLiteral("settingsHint"));
     layout->addWidget(hintLabel);
 
-    // 搜索框
+    // 搜索框（P2-H05 子项2: 占位文本「搜索快捷键...」+ 200ms 防抖）
     m_shortcutSearchInput = new QLineEdit(page);
     m_shortcutSearchInput->setPlaceholderText(tr("搜索快捷键..."));
     m_shortcutSearchInput->setObjectName(QStringLiteral("searchInput"));
     layout->addWidget(m_shortcutSearchInput);
 
-    // 表格
+    // P2-H05 子项2: 搜索防抖定时器（200ms）
+    m_shortcutSearchDebounceTimer = new QTimer(this);
+    m_shortcutSearchDebounceTimer->setSingleShot(true);
+    m_shortcutSearchDebounceTimer->setInterval(200);
+    connect(m_shortcutSearchDebounceTimer, &QTimer::timeout,
+            this, &SettingsPage::onShortcutSearchDebounced);
+
+    // 表格 — P2-H05 子项2: 改为 3 列（命令、描述、快捷键），支持点击表头排序
     m_shortcutTable = new QTableWidget(page);
-    m_shortcutTable->setColumnCount(4);
+    m_shortcutTable->setColumnCount(3);
     m_shortcutTable->setHorizontalHeaderLabels({
-        tr("命令名称"), tr("当前快捷键"), tr("分类"), tr("操作")
+        tr("命令"), tr("描述"), tr("快捷键")
     });
-    m_shortcutTable->horizontalHeader()->setStretchLastSection(true);
+    m_shortcutTable->horizontalHeader()->setStretchLastSection(false);
     m_shortcutTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    m_shortcutTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_shortcutTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_shortcutTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    m_shortcutTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Fixed);
-    m_shortcutTable->setColumnWidth(3, 80);
+    // P2-H05 子项2: 启用点击表头排序
+    m_shortcutTable->setSortingEnabled(true);
+    m_shortcutTable->horizontalHeader()->setSectionsClickable(true);
     m_shortcutTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_shortcutTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_shortcutTable->setAlternatingRowColors(true);
+    m_shortcutTable->verticalHeader()->setVisible(false);  // J4: 隐藏左侧行号列
+    m_shortcutTable->setShowGrid(false);                    // J4: 弱化网格线，提升质感
 
-    // 表格样式跟随主题
-    const auto& p = ThemeManager::instance().currentPalette();
-    QString bg = p.bgDialog.name(QColor::HexRgb);
-    QString fg = p.fgPrimary.name(QColor::HexRgb);
-    QString border = p.borderDefault.name(QColor::HexRgb);
-    QString altBg = p.bgHover.name(QColor::HexRgb);
-    QString headerBg = p.bgTitleBar.name(QColor::HexRgb);
-    QString accent = p.accentPrimary.name(QColor::HexArgb);
-
-    m_shortcutTable->setStyleSheet(
-        QStringLiteral("QTableWidget { background-color: %1; alternate-background-color: %2;"
-                       " color: %3; gridline-color: %4; border: 1px solid %4; border-radius: 4px; }")
-            .arg(bg, altBg, fg, border)
-        + QStringLiteral("QTableWidget::item { padding: 4px 8px; }")
-        + QStringLiteral("QTableWidget::item:selected { background-color: %1; color: #ffffff; }")
-            .arg(accent)
-        + QStringLiteral("QHeaderView::section { background-color: %1; color: %2;"
-                       " padding: 6px 8px; border: 1px solid %3; border-bottom: 2px solid %4; font-weight: bold; }")
-            .arg(headerBg, fg, border, accent)
-        + QStringLiteral("QPushButton { background-color: %1; color: white; border: 1px solid %1;"
-                       " padding: 3px 12px; border-radius: 3px; min-width: 50px; }")
-            .arg(accent)
-        + QStringLiteral("QPushButton:hover { background-color: %1; }")
-            .arg(p.accentHover.name(QColor::HexArgb))
-        + QStringLiteral("QPushButton:pressed { background-color: %1; }")
-            .arg(p.selectionBg.name(QColor::HexArgb))
-    );
+    // J3/J4: 表格样式提取到 applyShortcutPageTheme()，支持主题切换时动态刷新
+    applyShortcutPageTheme();
 
     layout->addWidget(m_shortcutTable, 1);
 
@@ -965,54 +1409,50 @@ void SettingsPage::createShortcutsPage()
         m_shortcutItems.clear();
         for (const auto& item : shortcutMgr.allShortcuts()) {
             ShortcutItem uiItem;
+            uiItem.id = item.id;
             uiItem.commandName = item.displayName;
+            uiItem.description = item.description;
             uiItem.keySequence = item.currentKey.toString();
             uiItem.category = item.category;
             uiItem.defaultKey = item.defaultKey.toString();
             m_shortcutItems.append(uiItem);
         }
     } else {
-        // Fallback：硬编码默认值（兼容旧版本）
+        // Fallback：硬编码默认值（兼容旧版本，ShortcutManager 未初始化时使用）
         m_shortcutItems = {
-            {tr("打开文件"),          QStringLiteral("Ctrl+O"),        tr("文件"),   QStringLiteral("Ctrl+O")},
-            {tr("新建文件"),          QStringLiteral("Ctrl+N"),        tr("文件"),   QStringLiteral("Ctrl+N")},
-            {tr("保存文件"),          QStringLiteral("Ctrl+S"),        tr("文件"),   QStringLiteral("Ctrl+S")},
-            {tr("另存为"),            QStringLiteral("Ctrl+Shift+S"),  tr("文件"),   QStringLiteral("Ctrl+Shift+S")},
-            {tr("撤销"),              QStringLiteral("Ctrl+Z"),        tr("编辑"),   QStringLiteral("Ctrl+Z")},
-            {tr("重做"),              QStringLiteral("Ctrl+Y"),        tr("编辑"),   QStringLiteral("Ctrl+Y")},
-            {tr("查找"),              QStringLiteral("Ctrl+F"),        tr("编辑"),   QStringLiteral("Ctrl+F")},
-            {tr("替换"),              QStringLiteral("Ctrl+H"),        tr("编辑"),   QStringLiteral("Ctrl+H")},
-            {tr("切换侧边栏"),        QStringLiteral("Ctrl+B"),        tr("视图"),   QStringLiteral("Ctrl+B")},
-            {tr("切换终端"),          QStringLiteral("Ctrl+`"),        tr("终端"),   QStringLiteral("Ctrl+`")},
-            {tr("新建终端"),          QStringLiteral("Ctrl+Shift+`"),  tr("终端"),   QStringLiteral("Ctrl+Shift+`")},
-            {tr("清屏"),              QStringLiteral("Ctrl+L"),        tr("终端"),   QStringLiteral("Ctrl+L")},
-            {tr("命令面板"),          QStringLiteral("Ctrl+Shift+P"),  tr("其他"),   QStringLiteral("Ctrl+Shift+P")},
-            {tr("切换主题"),          QStringLiteral("Ctrl+Shift+T"),  tr("其他"),   QStringLiteral("Ctrl+Shift+T")},
-            {tr("打开设置"),          QStringLiteral("Ctrl+,"),        tr("设置"),   QStringLiteral("Ctrl+,")},
-            {tr("关闭标签"),          QStringLiteral("Ctrl+W"),        tr("文件"),   QStringLiteral("Ctrl+W")},
-            {tr("全选"),              QStringLiteral("Ctrl+A"),        tr("编辑"),   QStringLiteral("Ctrl+A")},
-            {tr("复制"),              QStringLiteral("Ctrl+C"),        tr("编辑"),   QStringLiteral("Ctrl+C")},
-            {tr("粘贴"),              QStringLiteral("Ctrl+V"),        tr("编辑"),   QStringLiteral("Ctrl+V")},
-            {tr("剪切"),              QStringLiteral("Ctrl+X"),        tr("编辑"),   QStringLiteral("Ctrl+X")},
+            {QStringLiteral("file.open"),     tr("打开文件"),          tr("打开文件对话框"),        QStringLiteral("Ctrl+O"),        tr("文件"),   QStringLiteral("Ctrl+O")},
+            {QStringLiteral("file.new"),      tr("新建文件"),          tr("创建新文件"),            QStringLiteral("Ctrl+N"),        tr("文件"),   QStringLiteral("Ctrl+N")},
+            {QStringLiteral("file.save"),     tr("保存文件"),          tr("保存当前文件"),          QStringLiteral("Ctrl+S"),        tr("文件"),   QStringLiteral("Ctrl+S")},
+            {QStringLiteral("file.saveAs"),   tr("另存为"),            tr("另存为新文件"),          QStringLiteral("Ctrl+Shift+S"),  tr("文件"),   QStringLiteral("Ctrl+Shift+S")},
+            {QStringLiteral("edit.undo"),     tr("撤销"),              tr("撤销上一步操作"),        QStringLiteral("Ctrl+Z"),        tr("编辑"),   QStringLiteral("Ctrl+Z")},
+            {QStringLiteral("edit.redo"),     tr("重做"),              tr("重做撤销的操作"),        QStringLiteral("Ctrl+Y"),        tr("编辑"),   QStringLiteral("Ctrl+Y")},
+            {QStringLiteral("edit.find"),     tr("查找"),              tr("打开查找对话框"),        QStringLiteral("Ctrl+F"),        tr("编辑"),   QStringLiteral("Ctrl+F")},
+            {QStringLiteral("edit.replace"),  tr("替换"),              tr("打开替换对话框"),        QStringLiteral("Ctrl+H"),        tr("编辑"),   QStringLiteral("Ctrl+H")},
+            {QStringLiteral("command.palette"),tr("命令面板"),         tr("打开全局命令搜索框"),    QStringLiteral("Ctrl+Shift+P"),  tr("全局"),   QStringLiteral("Ctrl+Shift+P")},
+            {QStringLiteral("file.closeTab"), tr("关闭标签页"),        tr("关闭当前标签页"),        QStringLiteral("Ctrl+W"),        tr("文件"),   QStringLiteral("Ctrl+W")},
         };
     }
 
     // 填充表格数据
     refreshShortcutTable(QString());
 
-    // 底部操作按钮区
+    // 底部操作按钮区 — P2-H05 子项4: 4 个按钮（重置为默认 / 切换 VSCode 预设 / 导出 / 导入）
     auto* btnLayout = new QHBoxLayout();
     btnLayout->setSpacing(12);
 
-    auto* btnReset = new QPushButton(tr("恢复默认"), page);
+    auto* btnReset = new QPushButton(tr("重置为默认"), page);
     btnReset->setObjectName(QStringLiteral("btnResetSection"));
     btnLayout->addWidget(btnReset);
 
-    auto* btnExport = new QPushButton(tr("导出快捷键"), page);
+    m_btnShortcutVSCode = new QPushButton(tr("切换 VSCode 预设"), page);
+    m_btnShortcutVSCode->setObjectName(QStringLiteral("btnShortcutVSCode"));
+    btnLayout->addWidget(m_btnShortcutVSCode);
+
+    auto* btnExport = new QPushButton(tr("导出"), page);
     btnExport->setObjectName(QStringLiteral("btnExportConfig"));
     btnLayout->addWidget(btnExport);
 
-    auto* btnImport = new QPushButton(tr("导入快捷键"), page);
+    auto* btnImport = new QPushButton(tr("导入"), page);
     btnImport->setObjectName(QStringLiteral("btnImportConfig"));
     btnLayout->addWidget(btnImport);
 
@@ -1022,8 +1462,13 @@ void SettingsPage::createShortcutsPage()
     // 信号连接
     connect(m_shortcutSearchInput, &QLineEdit::textChanged,
             this, &SettingsPage::onShortcutSearchChanged);
+    // P2-H05 子项3: 双击快捷键列进入录制模式
+    connect(m_shortcutTable, &QTableWidget::cellDoubleClicked,
+            this, &SettingsPage::onShortcutCellDoubleClicked);
     connect(btnReset, &QPushButton::clicked,
             this, &SettingsPage::onShortcutResetDefaults);
+    connect(m_btnShortcutVSCode, &QPushButton::clicked,
+            this, &SettingsPage::onShortcutApplyVSCode);
     connect(btnExport, &QPushButton::clicked,
             this, &SettingsPage::onShortcutExport);
     connect(btnImport, &QPushButton::clicked,
@@ -1033,17 +1478,118 @@ void SettingsPage::createShortcutsPage()
     m_pageStack->addWidget(page);
 }
 
+// J3/J4: 应用快捷键页面主题样式 — 表格、搜索框、按钮全量适配主题
+// 切换主题时由 ThemeManager::themeChanged 信号触发重新调用
+void SettingsPage::applyShortcutPageTheme()
+{
+    if (!m_shortcutTable) return;
+
+    const auto& p = ThemeManager::instance().currentPalette();
+
+    // 提取主题色为 CSS 颜色字符串
+    QString bg       = p.bgDialog.name(QColor::HexRgb);
+    QString fg       = p.fgPrimary.name(QColor::HexRgb);
+    QString fgSec    = p.fgSecondary.name(QColor::HexRgb);
+    QString border   = p.borderDefault.name(QColor::HexRgb);
+    QString borderF  = p.borderFocus.name(QColor::HexRgb);
+    QString altBg    = p.bgHover.name(QColor::HexRgb);
+    QString headerBg = p.bgTitleBar.name(QColor::HexRgb);
+    QString accent   = p.accentPrimary.name(QColor::HexArgb);
+    QString accentH  = p.accentHover.name(QColor::HexArgb);
+    QString accentP  = p.accentPressed.name(QColor::HexArgb);
+    QString selBg    = p.selectionBg.name(QColor::HexArgb);
+    QString inputBg  = p.bgInput.name(QColor::HexRgb);
+
+    // J4: 表格样式 — 圆角边框、交替行色、hover 高亮、弱化网格线
+    QString tableQss = QStringLiteral(
+        // 表格容器：圆角边框 + 主题背景
+        "QTableWidget {"
+        "  background-color: %1;"
+        "  alternate-background-color: %2;"
+        "  color: %3;"
+        "  border: 1px solid %4;"
+        "  border-radius: 6px;"
+        "  outline: none;"
+        "}"
+        // 数据行：增加内边距提升可读性
+        "QTableWidget::item {"
+        "  padding: 6px 10px;"
+        "  border-bottom: 1px solid %4;"
+        "}"
+        // 悬浮行：主题 hover 色
+        "QTableWidget::item:hover {"
+        "  background-color: %2;"
+        "}"
+        // 选中行：强调色背景 + 白色文字
+        "QTableWidget::item:selected {"
+        "  background-color: %5;"
+        "  color: #ffffff;"
+        "}"
+        // 表头：深色背景 + 底部强调线 + 加粗
+        "QHeaderView::section {"
+        "  background-color: %6;"
+        "  color: %3;"
+        "  padding: 8px 10px;"
+        "  border: none;"
+        "  border-bottom: 2px solid %7;"
+        "  font-weight: bold;"
+        "}"
+        // 修改按钮：圆角 + hover/pressed 动效
+        "QPushButton {"
+        "  background-color: %7;"
+        "  color: white;"
+        "  border: none;"
+        "  padding: 5px 14px;"
+        "  border-radius: 4px;"
+        "  min-width: 50px;"
+        "  font-weight: 500;"
+        "}"
+        "QPushButton:hover {"
+        "  background-color: %8;"
+        "}"
+        "QPushButton:pressed {"
+        "  background-color: %9;"
+        "}"
+    ).arg(bg, altBg, fg, border, selBg, headerBg, accent, accentH, accentP);
+
+    m_shortcutTable->setStyleSheet(tableQss);
+
+    // J4: 搜索框样式 — 主题边框 + focus 高亮
+    if (m_shortcutSearchInput) {
+        m_shortcutSearchInput->setStyleSheet(QStringLiteral(
+            "QLineEdit {"
+            "  background-color: %1;"
+            "  color: %2;"
+            "  border: 1px solid %3;"
+            "  border-radius: 4px;"
+            "  padding: 6px 10px;"
+            "  font-size: 13px;"
+            "}"
+            "QLineEdit:focus {"
+            "  border: 1px solid %4;"
+            "}"
+            "QLineEdit::placeholder {"
+            "  color: %5;"
+            "}"
+        ).arg(inputBg, fg, border, borderF, fgSec));
+    }
+}
+
 void SettingsPage::refreshShortcutTable(const QString& filter)
 {
+    // P2-H05 子项2: 排序期间禁用重排，避免插入时触发不稳定排序
+    m_shortcutTable->setSortingEnabled(false);
     m_shortcutTable->setRowCount(0);
 
     for (int i = 0; i < m_shortcutItems.size(); ++i) {
         const auto& item = m_shortcutItems[i];
 
-        // 搜索过滤
+        // P2-H05 子项2: 按命令 ID、描述、当前快捷键文本匹配
         if (!filter.isEmpty()) {
             bool match = item.commandName.contains(filter, Qt::CaseInsensitive)
                       || item.keySequence.contains(filter, Qt::CaseInsensitive)
+                      || item.description.contains(filter, Qt::CaseInsensitive)
+                      || item.id.contains(filter, Qt::CaseInsensitive)
                       || item.category.contains(filter, Qt::CaseInsensitive);
             if (!match) continue;
         }
@@ -1051,17 +1597,27 @@ void SettingsPage::refreshShortcutTable(const QString& filter)
         int row = m_shortcutTable->rowCount();
         m_shortcutTable->insertRow(row);
 
-        // 命令名称
+        // 列 0：命令（displayName）
         auto* nameItem = new QTableWidgetItem(item.commandName);
-        nameItem->setData(Qt::UserRole, i);  // 存储原始索引
+        nameItem->setData(Qt::UserRole, i);  // 存储原始 m_shortcutItems 索引
+        nameItem->setFlags(nameItem->flags() & ~Qt::ItemIsEditable);
         m_shortcutTable->setItem(row, 0, nameItem);
 
-        // 当前快捷键（检查是否冲突）
+        // 列 1：描述
+        auto* descItem = new QTableWidgetItem(item.description);
+        descItem->setData(Qt::UserRole, i);
+        descItem->setFlags(descItem->flags() & ~Qt::ItemIsEditable);
+        m_shortcutTable->setItem(row, 1, descItem);
+
+        // 列 2：当前快捷键（冲突高亮）
         auto* keyItem = new QTableWidgetItem(item.keySequence);
+        keyItem->setData(Qt::UserRole, i);
+        keyItem->setFlags(keyItem->flags() & ~Qt::ItemIsEditable);
         // 冲突检测：高亮重复的快捷键
         bool hasConflict = false;
         for (int j = 0; j < m_shortcutItems.size(); ++j) {
-            if (j != i && m_shortcutItems[j].keySequence == item.keySequence) {
+            if (j != i && !item.keySequence.isEmpty()
+                && m_shortcutItems[j].keySequence == item.keySequence) {
                 hasConflict = true;
                 break;
             }
@@ -1069,86 +1625,140 @@ void SettingsPage::refreshShortcutTable(const QString& filter)
         if (hasConflict) {
             keyItem->setForeground(QColor("#ff4444"));  // 红色高亮冲突
         }
-        m_shortcutTable->setItem(row, 1, keyItem);
-
-        // 分类
-        m_shortcutTable->setItem(row, 2, new QTableWidgetItem(item.category));
-
-        // 操作按钮
-        auto* modifyBtn = new QPushButton(tr("修改"), m_shortcutTable);
-        modifyBtn->setProperty("row", row);
-        modifyBtn->setProperty("dataIndex", i);
-        connect(modifyBtn, &QPushButton::clicked, this, [this, idx = i]() {
-            onShortcutModifyClicked(idx);
-        });
-        m_shortcutTable->setCellWidget(row, 3, modifyBtn);
+        m_shortcutTable->setItem(row, 2, keyItem);
     }
+
+    // 重新启用排序（P2-H05 子项2: 支持点击表头排序）
+    m_shortcutTable->setSortingEnabled(true);
 }
 
 void SettingsPage::onShortcutModifyClicked(int dataIndex)
 {
+    // P2-H05 子项3: 保留向后兼容入口（点击修改按钮触发）
+    // 实际录制入口已迁移到 onShortcutCellDoubleClicked
     if (dataIndex < 0 || dataIndex >= m_shortcutItems.size()) return;
 
-    ShortcutCaptureDialog dialog(this);
-    if (dialog.exec() != QDialog::Accepted || dialog.capturedSequence().isEmpty()) {
-        return;
-    }
-
-    QString newSeq = dialog.capturedSequence();
-
-    // 使用 ShortcutManager 进行冲突检测和修改（T7增强）
-    auto& shortcutMgr = ShortcutManager::instance();
-    QStringList conflicts = shortcutMgr.checkConflict(QKeySequence(newSeq));
-
-    if (!conflicts.isEmpty()) {
-        // 获取冲突命令的显示名称
-        QString conflictNames;
-        for (const auto& conflictId : conflicts) {
-            auto item = shortcutMgr.shortcut(conflictId);
-            if (!conflictNames.isEmpty()) conflictNames += QStringLiteral(", ");
-            conflictNames += item.displayName;
-        }
-
-        int result = ModernDialog::warning(this, tr("快捷键冲突"),
-            tr("该快捷键已被「%1」使用，是否覆盖？").arg(conflictNames));
-        if (result != ModernDialog::ROLE_ACCEPT) return;
-    }
-
-    // 更新本地UI数据
-    m_shortcutItems[dataIndex].keySequence = newSeq;
-
-    // 同步到 ShortcutManager（通过ID查找，这里简化处理）
-    // 实际应该存储ID映射，当前使用命令名称匹配
-    for (auto& mgrItem : shortcutMgr.allShortcuts()) {
-        if (mgrItem.displayName == m_shortcutItems[dataIndex].commandName) {
-            shortcutMgr.setShortcut(mgrItem.id, QKeySequence(newSeq));
-            break;
+    // 在快捷键列中找到对应行并触发双击录制
+    for (int row = 0; row < m_shortcutTable->rowCount(); ++row) {
+        QTableWidgetItem* it = m_shortcutTable->item(row, 2);
+        if (it && it->data(Qt::UserRole).toInt() == dataIndex) {
+            onShortcutCellDoubleClicked(row, 2);
+            return;
         }
     }
-
-    refreshShortcutTable(m_shortcutSearchInput->text());
 }
 
 void SettingsPage::onShortcutSearchChanged(const QString& text)
 {
-    refreshShortcutTable(text.trimmed());
+    // P2-H05 子项2: 防抖 200ms — 避免每次按键同步全量过滤
+    m_pendingShortcutKeyword = text.trimmed();
+    if (m_shortcutSearchDebounceTimer) {
+        m_shortcutSearchDebounceTimer->start();  // 单次定时器，会自动重置
+    } else {
+        refreshShortcutTable(m_pendingShortcutKeyword);
+    }
+}
+
+void SettingsPage::onShortcutSearchDebounced()
+{
+    refreshShortcutTable(m_pendingShortcutKeyword);
+}
+
+// P2-H05 子项3: 双击快捷键单元格进入按键录制模式
+void SettingsPage::onShortcutCellDoubleClicked(int row, int col)
+{
+    // 仅快捷键列（第 2 列）进入录制
+    if (col != 2) return;
+    QTableWidgetItem* keyItem = m_shortcutTable->item(row, col);
+    if (!keyItem) return;
+
+    int dataIndex = keyItem->data(Qt::UserRole).toInt();
+    if (dataIndex < 0 || dataIndex >= m_shortcutItems.size()) return;
+
+    // 排序期间禁用，避免录制过程中行被重排
+    m_shortcutTable->setSortingEnabled(false);
+
+    auto* editor = new KeySequenceEdit(m_shortcutTable);
+    editor->setKeySequence(QKeySequence(m_shortcutItems[dataIndex].keySequence));
+    m_shortcutTable->setCellWidget(row, col, editor);
+    editor->setFocus();
+    editor->selectAll();
+
+    // 录制完成：提交并恢复显示
+    // 捕获 row 以避免 currentRow() 在延迟发射时已变化
+    QPointer<KeySequenceEdit> editorGuard(editor);
+    int dataIndexCapture = dataIndex;
+    int rowCapture = row;
+    auto commitEdit = [this, editorGuard, dataIndexCapture, rowCapture]() {
+        if (!editorGuard) return;
+        QKeySequence newSeq = editorGuard->keySequence();
+
+        // 冲突检测
+        auto& shortcutMgr = ShortcutManager::instance();
+        QString id = m_shortcutItems[dataIndexCapture].id;
+        QStringList conflicts = shortcutMgr.checkConflict(newSeq,
+            id.isEmpty() ? QString() : id);
+
+        if (!conflicts.isEmpty() && !newSeq.isEmpty()) {
+            QString conflictNames;
+            for (const auto& cid : conflicts) {
+                auto cItem = shortcutMgr.shortcut(cid);
+                if (!conflictNames.isEmpty()) conflictNames += QStringLiteral(", ");
+                conflictNames += cItem.displayName;
+            }
+            int r = ModernDialog::warning(this, tr("快捷键冲突"),
+                tr("该快捷键已被「%1」使用，是否覆盖？").arg(conflictNames));
+            if (r != ModernDialog::ROLE_ACCEPT) {
+                // 取消，恢复原值
+                m_shortcutTable->removeCellWidget(rowCapture, 2);
+                m_shortcutTable->setSortingEnabled(true);
+                refreshShortcutTable(m_shortcutSearchInput->text());
+                return;
+            }
+            // 用户确认覆盖，清空冲突命令的快捷键
+            for (const auto& cid : conflicts) {
+                shortcutMgr.setShortcut(cid, QKeySequence());
+            }
+        }
+
+        // 提交新值
+        m_shortcutItems[dataIndexCapture].keySequence = newSeq.toString();
+        if (!id.isEmpty()) {
+            shortcutMgr.setShortcut(id, newSeq);
+        }
+
+        // 移除编辑器并刷新表格
+        m_shortcutTable->removeCellWidget(rowCapture, 2);
+        m_shortcutTable->setSortingEnabled(true);
+        refreshShortcutTable(m_shortcutSearchInput->text());
+    };
+
+    connect(editor, &KeySequenceEdit::editingFinished, this, commitEdit);
+    connect(editor, &KeySequenceEdit::editingCanceled, this, [this, rowCapture]() {
+        m_shortcutTable->removeCellWidget(rowCapture, 2);
+        m_shortcutTable->setSortingEnabled(true);
+        refreshShortcutTable(m_shortcutSearchInput->text());
+    });
 }
 
 void SettingsPage::onShortcutResetDefaults()
 {
-    int result = ModernDialog::question(this, tr("恢复默认"),
-        tr("确定要将所有快捷键恢复为默认值吗？"));
+    int result = ModernDialog::question(this, tr("重置为默认"),
+        tr("确定要将所有快捷键重置为默认预设吗？"));
     if (result != ModernDialog::ROLE_ACCEPT) return;
 
-    // 使用 ShortcutManager 重置（T7增强）
+    // P2-H05 子项4: 调用 applyPreset(Default) 而非 resetAllToDefault
+    // 以确保 currentPreset 持久化字段同步更新
     auto& shortcutMgr = ShortcutManager::instance();
-    shortcutMgr.resetAllToDefault();
+    shortcutMgr.applyPreset(ShortcutPreset::Default);
 
     // 刷新UI数据
     m_shortcutItems.clear();
     for (const auto& item : shortcutMgr.allShortcuts()) {
         ShortcutItem uiItem;
+        uiItem.id = item.id;
         uiItem.commandName = item.displayName;
+        uiItem.description = item.description;
         uiItem.keySequence = item.currentKey.toString();
         uiItem.category = item.category;
         uiItem.defaultKey = item.defaultKey.toString();
@@ -1156,6 +1766,34 @@ void SettingsPage::onShortcutResetDefaults()
     }
 
     refreshShortcutTable(m_shortcutSearchInput->text());
+}
+
+// P2-H05 子项4: 切换到 VSCode 预设
+void SettingsPage::onShortcutApplyVSCode()
+{
+    int result = ModernDialog::question(this, tr("切换 VSCode 预设"),
+        tr("将批量覆盖关键命令的快捷键为 VSCode 风格，是否继续？"));
+    if (result != ModernDialog::ROLE_ACCEPT) return;
+
+    auto& shortcutMgr = ShortcutManager::instance();
+    shortcutMgr.applyPreset(ShortcutPreset::VSCode);
+
+    // 刷新UI数据
+    m_shortcutItems.clear();
+    for (const auto& item : shortcutMgr.allShortcuts()) {
+        ShortcutItem uiItem;
+        uiItem.id = item.id;
+        uiItem.commandName = item.displayName;
+        uiItem.description = item.description;
+        uiItem.keySequence = item.currentKey.toString();
+        uiItem.category = item.category;
+        uiItem.defaultKey = item.defaultKey.toString();
+        m_shortcutItems.append(uiItem);
+    }
+
+    refreshShortcutTable(m_shortcutSearchInput->text());
+    ModernDialog::information(this, tr("已切换"),
+        tr("已切换到 VSCode 预设方案"));
 }
 
 void SettingsPage::onShortcutExport()
@@ -1166,24 +1804,14 @@ void SettingsPage::onShortcutExport()
     );
     if (filePath.isEmpty()) return;
 
-    QJsonArray arr;
-    for (const auto& item : m_shortcutItems) {
-        QJsonObject obj;
-        obj[QStringLiteral("command")] = item.commandName;
-        obj[QStringLiteral("keySequence")] = item.keySequence;
-        obj[QStringLiteral("category")] = item.category;
-        obj[QStringLiteral("default")] = item.defaultKey;
-        arr.append(obj);
-    }
-
-    QJsonDocument doc(arr);
-    QFile file(filePath);
-    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        file.write(doc.toJson(QJsonDocument::Indented));
-        file.close();
-        ModernDialog::information(this, tr("导出成功"), tr("快捷键配置已导出到：\n%1").arg(filePath));
+    // P2-H05 子项4: 使用 ShortcutManager::exportToJson 导出全部快捷键
+    auto& shortcutMgr = ShortcutManager::instance();
+    if (shortcutMgr.exportToJson(filePath)) {
+        ModernDialog::information(this, tr("导出成功"),
+            tr("快捷键配置已导出到：\n%1").arg(filePath));
     } else {
-        ModernDialog::warning(this, tr("导出失败"), tr("无法写入文件：\n%1").arg(filePath));
+        ModernDialog::warning(this, tr("导出失败"),
+            tr("无法写入文件：\n%1").arg(filePath));
     }
 }
 
@@ -1195,37 +1823,45 @@ void SettingsPage::onShortcutImport()
     );
     if (filePath.isEmpty()) return;
 
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        ModernDialog::warning(this, tr("导入失败"), tr("无法读取文件：\n%1").arg(filePath));
+    // P2-H05 子项4: 导入前预检冲突，弹窗提示用户确认
+    auto& shortcutMgr = ShortcutManager::instance();
+    QStringList conflicts = shortcutMgr.checkImportConflicts(filePath);
+
+    if (conflicts.size() == 1 && conflicts.first() == QStringLiteral("PARSE_ERROR")) {
+        ModernDialog::warning(this, tr("导入失败"),
+            tr("JSON 解析错误或无法读取文件"));
         return;
     }
 
-    QJsonParseError error;
-    QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &error);
-    file.close();
+    if (!conflicts.isEmpty()) {
+        int r = ModernDialog::warning(this, tr("导入冲突"),
+            tr("导入将覆盖以下命令的快捷键：\n\n%1\n\n是否继续？")
+                .arg(conflicts.join(QStringLiteral("\n"))));
+        if (r != ModernDialog::ROLE_ACCEPT) return;
+    }
 
-    if (error.error != QJsonParseError::NoError || !doc.isArray()) {
-        ModernDialog::warning(this, tr("导入失败"), tr("JSON 解析错误或格式不正确"));
+    if (!shortcutMgr.importFromJson(filePath)) {
+        ModernDialog::warning(this, tr("导入失败"),
+            tr("导入过程中发生错误"));
         return;
     }
 
-    QJsonArray arr = doc.array();
-    for (const QJsonValue& val : arr) {
-        QJsonObject obj = val.toObject();
-        QString cmd = obj.value(QStringLiteral("command")).toString();
-        QString seq = obj.value(QStringLiteral("keySequence")).toString();
-
-        for (auto& item : m_shortcutItems) {
-            if (item.commandName == cmd) {
-                item.keySequence = seq;
-                break;
-            }
-        }
+    // 刷新UI数据
+    m_shortcutItems.clear();
+    for (const auto& item : shortcutMgr.allShortcuts()) {
+        ShortcutItem uiItem;
+        uiItem.id = item.id;
+        uiItem.commandName = item.displayName;
+        uiItem.description = item.description;
+        uiItem.keySequence = item.currentKey.toString();
+        uiItem.category = item.category;
+        uiItem.defaultKey = item.defaultKey.toString();
+        m_shortcutItems.append(uiItem);
     }
 
     refreshShortcutTable(m_shortcutSearchInput->text());
-    ModernDialog::information(this, tr("导入成功"), tr("快捷键配置已成功导入"));
+    ModernDialog::information(this, tr("导入成功"),
+        tr("快捷键配置已成功导入"));
 }
 
 void SettingsPage::loadCurrentConfig()
@@ -1314,6 +1950,9 @@ void SettingsPage::loadCurrentConfig()
     bool autoFormatJson = config.getValue("Editor/autoFormatJson", false).toBool();
     m_autoFormatJsonCheck->setChecked(autoFormatJson);
 
+    // P3-M03 子项5: 拼写检查开关
+    m_spellCheckCheck->setChecked(config.spellCheckEnabled());
+
     // LSP 配置
     QString lspPythonPath = config.getValue("LSP/pythonServer", QString()).toString();
     if (!lspPythonPath.isEmpty()) {
@@ -1332,6 +1971,43 @@ void SettingsPage::loadCurrentConfig()
     }
     bool lspAutoStart = config.getValue("LSP/autoStart", true).toBool();
     m_lspAutoStartCheck->setChecked(lspAutoStart);
+
+    // P1 C05-2: 构建配置（使用 ConfigManager 专用方法）
+    QString buildQtPath = config.qtPrefixPath();
+    if (!buildQtPath.isEmpty()) {
+        m_buildQtPathLabel->setText(QDir(buildQtPath).dirName());
+        m_buildQtPathLabel->setToolTip(buildQtPath);
+    }
+    QString buildSslPath = config.opensslPath();
+    if (!buildSslPath.isEmpty()) {
+        m_buildOpenSslPathLabel->setText(QDir(buildSslPath).dirName());
+        m_buildOpenSslPathLabel->setToolTip(buildSslPath);
+    }
+    QString buildZlibPath = config.getValue(QStringLiteral("Build/zlibPath")).toString();
+    if (!buildZlibPath.isEmpty()) {
+        m_buildZlibPathLabel->setText(QDir(buildZlibPath).dirName());
+        m_buildZlibPathLabel->setToolTip(buildZlibPath);
+    }
+    // 构建类型：阻塞信号避免启动时触发 onBuildTypeChanged → configChanged
+    QString buildType = config.buildType();
+    int buildTypeIdx = m_buildTypeCombo->findData(buildType);
+    {
+        QSignalBlocker blocker(m_buildTypeCombo);
+        m_buildTypeCombo->setCurrentIndex(buildTypeIdx >= 0 ? buildTypeIdx : 0);
+    }
+    // 编译器路径
+    QString compilerPath = config.compilerPath();
+    if (!compilerPath.isEmpty()) {
+        m_buildCompilerPathLabel->setText(QFileInfo(compilerPath).fileName());
+        m_buildCompilerPathLabel->setToolTip(compilerPath);
+    }
+    // CMake 额外参数
+    m_buildCmakeArgsEdit->setText(config.cmakeExtraArgs());
+
+    // P3-M02 子项2: Markdown 自定义 CSS（加载到编辑区，便于用户继续编辑）
+    if (m_mdCssEdit) {
+        m_mdCssEdit->setPlainText(config.markdownCustomCss());
+    }
 }
 
 // ========== 槽函数 ==========
@@ -1404,6 +2080,15 @@ void SettingsPage::onFormatToolPathClicked()
 void SettingsPage::onAutoFormatJsonToggled(bool checked)
 {
     ConfigManager::instance().setValue("Editor/autoFormatJson", checked);
+    emit configChanged();
+}
+
+// ========== P3-M03 子项5: 拼写检查槽函数 ==========
+
+void SettingsPage::onSpellCheckToggled(bool checked)
+{
+    ConfigManager::instance().setSpellCheckEnabled(checked);
+    // configChanged 信号由 ConfigManager::setValue 内部触发，各编辑器监听后同步开关
     emit configChanged();
 }
 
@@ -1511,7 +2196,10 @@ void SettingsPage::onMatchingModeChanged(int index)
 void SettingsPage::onLanguageChanged(int index)
 {
     QString lang = m_languageCombo->itemData(index).toString();
-    ConfigManager::instance().setValue(QStringLiteral("app/language"), lang);
+    // P3-M05: 使用 ConfigManager::setLanguage 统一持久化（含校验逻辑）
+    ConfigManager::instance().setLanguage(lang);
+    // 立即切换翻译器与 QLocale（已构造 UI 仍需重启完全生效）
+    I18nManager::instance().switchLanguage(lang);
     // 语言切换需要重启应用才能生效
     ModernDialog::information(
         this,
@@ -1573,6 +2261,193 @@ void SettingsPage::onLspAutoStartToggled(bool checked)
     emit configChanged();
 }
 
+// ========== P1 C05-2: 构建配置槽函数 ==========
+
+void SettingsPage::onBuildQtPathClicked()
+{
+    QString cur = ConfigManager::instance().qtPrefixPath();
+    QString path = QFileDialog::getExistingDirectory(
+        this, tr("选择 Qt 安装路径"),
+        cur.isEmpty() ? QStringLiteral("") : cur
+    );
+    if (!path.isEmpty()) {
+        m_buildQtPathLabel->setText(QDir(path).dirName());
+        m_buildQtPathLabel->setToolTip(path);
+        ConfigManager::instance().setQtPrefixPath(path);
+        emit configChanged();
+    }
+}
+
+void SettingsPage::onBuildOpenSslPathClicked()
+{
+    QString cur = ConfigManager::instance().opensslPath();
+    QString path = QFileDialog::getExistingDirectory(
+        this, tr("选择 OpenSSL 安装路径"),
+        cur.isEmpty() ? QStringLiteral("") : cur
+    );
+    if (!path.isEmpty()) {
+        m_buildOpenSslPathLabel->setText(QDir(path).dirName());
+        m_buildOpenSslPathLabel->setToolTip(path);
+        ConfigManager::instance().setOpensslPath(path);
+        emit configChanged();
+    }
+}
+
+void SettingsPage::onBuildZlibPathClicked()
+{
+    QString cur = ConfigManager::instance().getValue(QStringLiteral("Build/zlibPath")).toString();
+    QString path = QFileDialog::getExistingDirectory(
+        this, tr("选择 zlib 安装路径"),
+        cur.isEmpty() ? QStringLiteral("") : cur
+    );
+    if (!path.isEmpty()) {
+        m_buildZlibPathLabel->setText(QDir(path).dirName());
+        m_buildZlibPathLabel->setToolTip(path);
+        ConfigManager::instance().setValue(QStringLiteral("Build/zlibPath"), path);
+        emit configChanged();
+    }
+}
+
+void SettingsPage::onBuildTypeChanged(int index)
+{
+    QString buildType = m_buildTypeCombo->itemData(index).toString();
+    ConfigManager::instance().setBuildType(buildType);
+    emit configChanged();
+    // P1 C05-4: 切换构建类型时提示用户需要重新运行 CMake 配置
+    QMessageBox::information(
+        this, tr("构建类型已变更"),
+        tr("构建类型已切换为 %1，需要重新运行 CMake 配置才能生效。\n"
+           "请在终端执行 cmake 命令重新配置构建目录。").arg(buildType));
+}
+
+// ========== P1 C05-3: 自动检测 Qt 安装（委托给 QtDetector）==========
+
+QStringList SettingsPage::detectQtInstallations()
+{
+    // C05-3: 委托给 QtDetector::detectAll()，返回前缀路径列表（向后兼容）
+    QStringList found;
+    const auto installations = QtDetector::detectAll();
+    for (const auto& inst : installations) {
+        found << inst.prefixPath;
+    }
+    return found;
+}
+
+void SettingsPage::onBuildAutoDetectQt()
+{
+    // C05-3: 调用 QtDetector::detectAll()，获取带版本/编译器信息的 Qt 安装列表
+    QList<QtInstallation> installations = QtDetector::detectAll();
+
+    if (installations.isEmpty()) {
+        QMessageBox::information(
+            this, tr("自动检测 Qt"),
+            tr("未在标准路径（各盘符 \\Qt\\<版本>\\<编译器>）下检测到 Qt 安装。\n"
+               "请手动浏览选择 Qt 安装路径，或检查 Qt 是否已正确安装。"));
+        return;
+    }
+
+    QString selected;
+    QString selectedDisplay;
+    if (installations.size() == 1) {
+        selected = installations.first().prefixPath;
+        selectedDisplay = installations.first().displayText();
+    } else {
+        // 多个候选：用 QInputDialog 让用户选择（展示版本与编译器信息）
+        QStringList items;
+        for (const auto& inst : installations) {
+            items << inst.displayText();
+        }
+        bool ok = false;
+        QString chosen = QInputDialog::getItem(
+            this, tr("自动检测 Qt"),
+            tr("检测到多个 Qt 安装，请选择一个："),
+            items, 0, false, &ok);
+        if (!ok || chosen.isEmpty()) return;
+        // 通过显示文本反查 prefixPath
+        for (const auto& inst : installations) {
+            if (inst.displayText() == chosen) {
+                selected = inst.prefixPath;
+                selectedDisplay = inst.displayText();
+                break;
+            }
+        }
+        if (selected.isEmpty()) return;
+    }
+
+    // 应用所选路径（使用 ConfigManager 专用方法）
+    m_buildQtPathLabel->setText(QDir(selected).dirName());
+    m_buildQtPathLabel->setToolTip(selected);
+    ConfigManager::instance().setQtPrefixPath(selected);
+    emit configChanged();
+    QMessageBox::information(
+        this, tr("自动检测 Qt"),
+        tr("已应用 Qt 路径：\n%1").arg(selectedDisplay));
+}
+
+// ========== P1 C05-4: 构建目录配置 ==========
+
+void SettingsPage::onBuildDirClicked()
+{
+    // C05-4: 选择构建目录（默认项目根下的 build）
+    QString cur = ConfigManager::instance().getValue(QStringLiteral("Build/buildDir")).toString();
+    if (cur.isEmpty()) {
+        // 默认为项目根目录下的 build
+        cur = QDir::currentPath() + QStringLiteral("/build");
+    }
+    QString path = QFileDialog::getExistingDirectory(
+        this, tr("选择构建输出目录"), cur);
+    if (!path.isEmpty()) {
+        m_buildDirLabel->setText(QDir(path).dirName());
+        m_buildDirLabel->setToolTip(path);
+        ConfigManager::instance().setValue(QStringLiteral("Build/buildDir"), path);
+        emit configChanged();
+    }
+}
+
+void SettingsPage::onBuildSeparateDirsToggled(bool checked)
+{
+    // C05-4: 按构建类型分离目录（build/Debug、build/Release 各自独立）
+    ConfigManager::instance().setValue(QStringLiteral("Build/separateDirs"), checked);
+    emit configChanged();
+}
+
+// ========== P1 C05-2: 编译器路径与 CMake 额外参数 ==========
+
+void SettingsPage::onBuildCompilerPathClicked()
+{
+    // 选择编译器可执行文件（gcc/g++/cl.exe 等）
+    QString cur = ConfigManager::instance().compilerPath();
+    QString path = QFileDialog::getOpenFileName(
+        this, tr("选择编译器可执行文件"),
+        cur.isEmpty() ? QStringLiteral("") : cur,
+        tr("可执行文件 (*.exe);;所有文件 (*)")
+    );
+    if (!path.isEmpty()) {
+        m_buildCompilerPathLabel->setText(QFileInfo(path).fileName());
+        m_buildCompilerPathLabel->setToolTip(path);
+        ConfigManager::instance().setCompilerPath(path);
+        emit configChanged();
+    }
+}
+
+void SettingsPage::onBuildApplyReconfigure()
+{
+    // P1 C05-2: 写入配置文件，提示用户重启生效
+    // 同步 CMake 额外参数到 ConfigManager
+    ConfigManager::instance().setCmakeExtraArgs(m_buildCmakeArgsEdit->text().trimmed());
+    ConfigManager::instance().sync();
+    emit configChanged();
+
+    // 提示用户：配置已写入，需手动重新运行 CMake 配置
+    ModernDialog::information(
+        this, tr("应用并重新配置"),
+        tr("构建配置已写入配置文件。\n"
+           "请在终端中切换到构建目录，重新执行 CMake 配置命令以使更改生效：\n\n"
+           "  cmake <源码目录> -DCMAKE_PREFIX_PATH=<Qt路径> "
+           "-DCMAKE_BUILD_TYPE=<构建类型> <额外参数>\n\n"
+           "修改构建类型或路径后需要重新配置。"));
+}
+
 void SettingsPage::onCategoryChanged(int row)
 {
     if (row >= 0 && row < m_pageStack->count()) {
@@ -1582,7 +2457,14 @@ void SettingsPage::onCategoryChanged(int row)
 
 void SettingsPage::onSearchTextChanged(const QString& text)
 {
-    filterSettings(text.trimmed());
+    // Bug5: 防抖处理 — 缓存最新关键词，重启定时器，150ms 静止后才执行过滤
+    // 避免快速输入（如 "CMake"）时每次按键都同步遍历+setHidden 导致主线程阻塞/白屏
+    m_pendingKeyword = text.trimmed();
+    if (m_searchDebounceTimer) {
+        m_searchDebounceTimer->start();
+    } else {
+        filterSettings(m_pendingKeyword);
+    }
 }
 
 void SettingsPage::onResetCurrentSection()
@@ -1604,6 +2486,8 @@ void SettingsPage::onResetCurrentSection()
         m_formatToolPathLabel->setToolTip(QString());
         // M10: JSON格式化
         m_autoFormatJsonCheck->setChecked(false);
+        // P3-M03 子项5: 拼写检查
+        m_spellCheckCheck->setChecked(false);
         break;
     case 2: // 终端
         m_terminalTypeCombo->setCurrentIndex(0);
@@ -1637,6 +2521,31 @@ void SettingsPage::onResetCurrentSection()
         m_lspJsPathLabel->setToolTip(QString());
         m_lspAutoStartCheck->setChecked(true);
         break;
+    case 6: // P1 C05-2: 构建配置
+        m_buildQtPathLabel->setText(tr("(使用环境变量 CMAKE_PREFIX_PATH)"));
+        m_buildQtPathLabel->setToolTip(QString());
+        m_buildOpenSslPathLabel->setText(tr("(使用环境变量 OPENSSL_ROOT_DIR)"));
+        m_buildOpenSslPathLabel->setToolTip(QString());
+        m_buildZlibPathLabel->setText(tr("(使用环境变量 ZLIB_ROOT)"));
+        m_buildZlibPathLabel->setToolTip(QString());
+        m_buildTypeCombo->setCurrentIndex(0);  // Debug
+        // C05-4: 构建目录与分离目录复选框
+        m_buildDirLabel->setText(tr("(默认 build)"));
+        m_buildDirLabel->setToolTip(QString());
+        m_buildSeparateDirsCheck->setChecked(false);
+        // 编译器路径与 CMake 额外参数
+        m_buildCompilerCombo->setCurrentIndex(0);  // MinGW
+        m_buildCompilerPathLabel->setText(tr("(使用系统默认)"));
+        m_buildCompilerPathLabel->setToolTip(QString());
+        m_buildCmakeArgsEdit->clear();
+        break;
+    case 7: // P3-M02 子项2: Markdown 自定义 CSS
+        if (m_mdCssEdit) {
+            m_mdCssEdit->clear();
+        }
+        ConfigManager::instance().setMarkdownCustomCss(QString());
+        emit configChanged();
+        break;
     }
 }
 
@@ -1645,7 +2554,7 @@ void SettingsPage::onResetAll()
     int result = ModernDialog::question(this, tr("恢复默认"),
         tr("确定要恢复所有设置为默认值吗？"));
     if (result == ModernDialog::ROLE_ACCEPT) {
-        for (int i = 0; i < 6; ++i) {
+        for (int i = 0; i < m_categoryList->count(); ++i) {
             m_categoryList->setCurrentRow(i);
             onResetCurrentSection();
         }
@@ -1665,11 +2574,16 @@ void SettingsPage::filterSettings(const QString& keyword)
 
     // 简单关键词匹配：根据关键词显示对应分类
     QStringList appearanceKeywords = {tr("主题"), tr("配色"), tr("字体"), tr("外观"), tr("亮色"), tr("暗色")};
-    QStringList editorKeywords = {tr("编辑"), tr("行号"), tr("缩进"), tr("保存"), tr("自动保存")};
+    QStringList editorKeywords = {tr("编辑"), tr("行号"), tr("缩进"), tr("保存"), tr("自动保存"), tr("拼写")};
     QStringList terminalKeywords = {tr("终端"), tr("CMD"), tr("PowerShell")};
     QStringList completionKeywords = {tr("提示"), tr("补全"), tr("智能"), tr("延迟"), tr("匹配"), tr("模糊")};
     QStringList shortcutKeywords = {tr("快捷键"), tr("快捷"), tr("热键")};
     QStringList lspKeywords = {tr("LSP"), tr("语言服务器"), tr("pylsp"), tr("clangd"), tr("补全"), tr("诊断")};
+    QStringList buildKeywords = {tr("构建"), tr("CMake"), tr("Qt"), tr("OpenSSL"), tr("zlib"), tr("Debug"), tr("Release")};
+    QStringList markdownKeywords = {tr("Markdown"), tr("CSS"), tr("样式"), tr("预览"), tr("mermaid")};
+
+    // Bug5: 批量更新 — 禁用更新期间的重绘，避免逐项 setHidden 触发多次布局/重绘导致白屏
+    m_categoryList->setUpdatesEnabled(false);
 
     for (int i = 0; i < m_categoryList->count(); ++i) {
         bool match = false;
@@ -1681,6 +2595,8 @@ void SettingsPage::filterSettings(const QString& keyword)
         case 3: keywords = &completionKeywords; break;
         case 4: keywords = &shortcutKeywords; break;
         case 5: keywords = &lspKeywords; break;
+        case 6: keywords = &buildKeywords; break;
+        case 7: keywords = &markdownKeywords; break;
         }
 
         if (keywords) {
@@ -1693,6 +2609,9 @@ void SettingsPage::filterSettings(const QString& keyword)
         }
         m_categoryList->item(i)->setHidden(!match);
     }
+
+    m_categoryList->setUpdatesEnabled(true);
+    m_categoryList->update();
 }
 
 void SettingsPage::onExportConfig()

@@ -43,11 +43,80 @@ QString FileController::readFile(const QString& filePath,
     return content;
 }
 
-bool FileController::writeFile(const QString& filePath,
-                               const QString& content,
-                               const QString& encoding)
+// P3-M03 子项1: 从原始字节流检测行尾类型
+// 统计前 16KB 中 \r\n / \r / \n 出现次数，取最多的作为结果
+// 兼容二进制：扫描字符前需确保不是 NULL（0x00），避免二进制文件误判
+QString FileController::detectEol(const QByteArray& rawData)
+{
+    int n = qMin(rawData.size(), 16 * 1024);
+    int crlf = 0, lf = 0, cr = 0;
+    for (int i = 0; i < n; ++i) {
+        char c = rawData[i];
+        if (c == '\r') {
+            if (i + 1 < n && rawData[i + 1] == '\n') {
+                ++crlf;
+                ++i;  // 跳过 \n
+            } else {
+                ++cr;
+            }
+        } else if (c == '\n') {
+            ++lf;
+        }
+    }
+    // 优先级：CRLF > LF > CR（数量相等时取跨平台兼容性更好的）
+    if (crlf >= lf && crlf >= cr && crlf > 0) return QStringLiteral("CRLF");
+    if (lf >= cr && lf > 0) return QStringLiteral("LF");
+    if (cr > 0) return QStringLiteral("CR");
+    return QStringLiteral("LF");  // 默认
+}
+
+// P3-M03 子项1: 读取文件并检测行尾类型
+QString FileController::readFileWithEol(const QString& filePath,
+                                        QString* detectedEol)
 {
     QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (detectedEol) *detectedEol = QStringLiteral("LF");
+        return QString();
+    }
+    QByteArray rawData = file.readAll();
+    file.close();
+
+    if (detectedEol) *detectedEol = detectEol(rawData);
+
+    // 自动编码检测
+    EncodingDetectionResult result = EncodingDetector::detect(rawData);
+    QString content;
+    QString effectiveEncoding = QStringLiteral("UTF-8");
+
+    if (result.isValid && result.codec) {
+        effectiveEncoding = result.encodingName;
+        content = result.codec->toUnicode(rawData);
+    } else {
+        auto decoder = QStringDecoder(QStringConverter::Utf8);
+        content = decoder.isValid() ? decoder(rawData) : QString::fromUtf8(rawData);
+    }
+
+    return content;
+}
+
+bool FileController::writeFile(const QString& filePath,
+                               const QString& content,
+                               const QString& encoding,
+                               const QString& eol)
+{
+    // P3-M03 子项1: 按指定 EOL 类型统一行尾
+    // Qt 文档内部使用单个 '\n'（U+000A）作为段落分隔符，转换为指定 EOL 序列
+    QString normalized = content;
+    if (eol.compare(QStringLiteral("CRLF"), Qt::CaseInsensitive) == 0) {
+        normalized = QString(content).replace(QChar('\n'), QStringLiteral("\r\n"));
+    } else if (eol.compare(QStringLiteral("CR"), Qt::CaseInsensitive) == 0) {
+        normalized = QString(content).replace(QChar('\n'), QChar('\r'));
+    }
+    // LF 或空字符串：保持 \n（无需转换）
+
+    QFile file(filePath);
+    // 不使用 QIODevice::Text（避免 Qt 自动行尾转换覆盖 EOL 设置）
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         LOG_DEBUG("[FileController] writeFile 打开失败:" << filePath
                   << "err:" << file.errorString());
@@ -59,7 +128,7 @@ bool FileController::writeFile(const QString& filePath,
         encoding.compare("GB18030", Qt::CaseInsensitive) == 0) {
         QTextCodec* codec = QTextCodec::codecForName(encoding.toUtf8());
         if (codec) {
-            file.write(codec->fromUnicode(content));
+            file.write(codec->fromUnicode(normalized));
             file.flush();
             file.close();
             return true;
@@ -70,7 +139,7 @@ bool FileController::writeFile(const QString& filePath,
     if (encoding.contains("UTF-16", Qt::CaseInsensitive)) {
         QTextCodec* codec = QTextCodec::codecForName(encoding.toUtf8());
         if (codec) {
-            file.write(codec->fromUnicode(content));
+            file.write(codec->fromUnicode(normalized));
             file.flush();
             file.close();
             return true;
@@ -83,7 +152,7 @@ bool FileController::writeFile(const QString& filePath,
 
     QTextStream out(&file);
     out.setEncoding(enc);
-    out << content;
+    out << normalized;
     out.flush();
     file.close();
     return true;

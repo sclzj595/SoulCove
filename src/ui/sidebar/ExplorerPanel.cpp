@@ -1,4 +1,5 @@
 #include "ui/sidebar/ExplorerPanel.h"
+#include "ui/sidebar/OutlinePanel.h"
 #include "Logger.hpp"
 
 #include <QTreeWidget>
@@ -18,6 +19,15 @@
 #include <QEvent>
 #include <QColor>
 #include <QFont>
+#include <QFrame>
+#include <QSet>
+#include <QToolButton>
+#include <QSplitter>
+#include <QLocale>          // P3-M05: 文件修改时间本地化格式
+#include <QDateTime>        // P3-M05: 文件修改时间格式化
+#include <QByteArray>
+
+#include "core/config/ConfigManager.h"
 
 ExplorerPanel::ExplorerPanel(QWidget* parent)
     : QWidget(parent)
@@ -93,7 +103,58 @@ ExplorerPanel::ExplorerPanel(QWidget* parent)
                                QStringLiteral("Noto Color Emoji")});
         m_fileTree->setFont(emojiFont);
     }
-    explorerLayout->addWidget(m_fileTree);
+    // 注意：m_fileTree 暂不加入 layout，稍后加入 QSplitter
+
+    // === V2.1: 大纲区域（嵌入文件树下方，VSCode 风格）===
+    // 布局：[可点击标题栏(▼/▶ 大纲)] + [OutlinePanel 符号树]
+    m_outlineContainer = new QWidget(this);
+    m_outlineContainer->setObjectName(QStringLiteral("outlineContainer"));
+    auto* outlineLayout = new QVBoxLayout(m_outlineContainer);
+    outlineLayout->setContentsMargins(0, 4, 0, 0);
+    outlineLayout->setSpacing(0);
+
+    // 可点击的标题栏（点击切换折叠/展开）
+    m_outlineHeader = new QWidget(m_outlineContainer);
+    m_outlineHeader->setObjectName(QStringLiteral("outlineHeader"));
+    m_outlineHeader->setCursor(Qt::PointingHandCursor);
+    m_outlineHeader->setFixedHeight(22);
+    auto* outlineHeaderLayout = new QHBoxLayout(m_outlineHeader);
+    outlineHeaderLayout->setContentsMargins(6, 0, 6, 0);
+    outlineHeaderLayout->setSpacing(4);
+
+    m_outlineArrow = new QToolButton(m_outlineHeader);
+    m_outlineArrow->setObjectName(QStringLiteral("outlineArrow"));
+    m_outlineArrow->setArrowType(Qt::RightArrow);  // 默认折叠 → 右箭头
+    m_outlineArrow->setFixedSize(16, 16);
+    m_outlineArrow->setStyleSheet(QStringLiteral("QToolButton{border:none;background:transparent;}"));
+    m_outlineTitle = new QLabel(tr("大纲"), m_outlineHeader);
+    m_outlineTitle->setObjectName(QStringLiteral("panelTitle"));
+    outlineHeaderLayout->addWidget(m_outlineArrow);
+    outlineHeaderLayout->addWidget(m_outlineTitle);
+    outlineHeaderLayout->addStretch();
+
+    outlineLayout->addWidget(m_outlineHeader);
+
+    // 符号树组件（复用现有 OutlinePanel，所有能力保留）
+    m_outlineSection = new OutlinePanel(m_outlineContainer);
+    m_outlineSection->setObjectName(QStringLiteral("outlineSection"));
+    outlineLayout->addWidget(m_outlineSection);
+    m_outlineSection->hide();  // 默认折叠
+
+    // === V2.1: 内容分割器（文件树 / 大纲区域可拖拽调节高度，对齐 VSCode）===
+    m_contentSplitter = new QSplitter(Qt::Vertical, this);
+    m_contentSplitter->setObjectName(QStringLiteral("contentSplitter"));
+    m_contentSplitter->setChildrenCollapsible(false);  // 防止拖到 0 高度
+    m_contentSplitter->setHandleWidth(4);              // 分割线宽度 4px
+    m_contentSplitter->addWidget(m_fileTree);          // 上：文件树
+    m_contentSplitter->addWidget(m_outlineContainer);  // 下：大纲区域
+    // 初始比例：文件树占满，大纲折叠（高度 0）
+    m_contentSplitter->setSizes({999, 0});
+    // 文件树最小高度 80px，大纲区域最小高度 60px（标题栏 22 + 符号树至少 38）
+    m_contentSplitter->setStretchFactor(0, 1);  // 文件树可拉伸
+    m_contentSplitter->setStretchFactor(1, 0);  // 大纲区域默认不拉伸
+
+    explorerLayout->addWidget(m_contentSplitter);
 
     // === 信号连接 ===
     connect(m_fileTree, &QTreeWidget::itemDoubleClicked,
@@ -115,12 +176,58 @@ ExplorerPanel::ExplorerPanel(QWidget* parent)
             this, &ExplorerPanel::onRefresh);
     connect(m_btnCollapseAll, &QPushButton::clicked,
             this, &ExplorerPanel::onCollapseAll);
+
+    // V2.1: 大纲标题栏点击 → 切换折叠/展开
+    m_outlineHeader->installEventFilter(this);
+    // V2.1: 大纲符号点击 → 转发给 SideBar/Widget 跳转
+    connect(m_outlineSection, &OutlinePanel::symbolClicked,
+            this, &ExplorerPanel::outlineSymbolClicked);
+    // V2.1: 离线扫描完成 → 自动展开大纲区域（若扫描到符号）
+    // V2.1 H4 修复：用户手动折叠过则不自动展开
+    connect(m_outlineSection, &OutlinePanel::scanFinished,
+            this, [this](const QString&, int symbolCount) {
+        if (symbolCount > 0 && !m_userCollapsedOutline) {
+            setOutlineExpanded(true);
+        }
+    });
+    // V2.1 M2 修复：启动时恢复上次的 splitter 高度比例
+    loadState();
 }
 
 void ExplorerPanel::setWorkspaceFolders(const QStringList& folders)
 {
     m_workspaceFolders = folders;
     refreshFileList();
+}
+
+// ============================================================
+// P2-H04: 多文件夹工作区 — 按路径增删根文件夹
+// ============================================================
+
+bool ExplorerPanel::addFolderToWorkspace(const QString& folder)
+{
+    if (folder.isEmpty()) return false;
+    QString abs = QDir(folder).absolutePath();
+    if (m_workspaceFolders.contains(abs)) {
+        return false;
+    }
+    m_workspaceFolders.append(abs);
+    refreshFileList();
+    LOG_DEBUG("[ExplorerPanel] 添加文件夹到工作区: " << abs);
+    return true;
+}
+
+bool ExplorerPanel::removeFolderFromWorkspace(const QString& folder)
+{
+    if (folder.isEmpty()) return false;
+    QString abs = QDir(folder).absolutePath();
+    if (!m_workspaceFolders.contains(abs)) {
+        return false;
+    }
+    m_workspaceFolders.removeAll(abs);
+    refreshFileList();
+    LOG_DEBUG("[ExplorerPanel] 从工作区移除文件夹: " << abs);
+    return true;
 }
 
 // ============================================================
@@ -159,7 +266,7 @@ void ExplorerPanel::refreshFileList()
     m_fileTree->clear();
 
     // VSCode风格：没有打开文件夹时显示提示，不自动加载默认目录
-    if (m_workspaceFolders.isEmpty()) {
+    if (m_workspaceFolders.isEmpty() && m_remoteMounts.isEmpty()) {
         m_pathLabel->setText(tr("（未打开文件夹）"));
         m_pathLabel->setToolTip(QString());
 
@@ -183,7 +290,7 @@ void ExplorerPanel::refreshFileList()
         }
 
         // 单文件夹时不显示根节点（直接展开内容），多文件夹时显示根节点
-        if (m_workspaceFolders.size() == 1) {
+        if (m_workspaceFolders.size() == 1 && m_remoteMounts.isEmpty()) {
             // 单文件夹模式：直接填充（兼容旧行为）
             populateFileTree(nullptr, dir);
         } else {
@@ -200,22 +307,78 @@ void ExplorerPanel::refreshFileList()
         }
     }
 
+    // P3-M01 子项4: 显示远程挂载点（云图标前缀）
+    for (auto it = m_remoteMounts.constBegin(); it != m_remoteMounts.constEnd(); ++it) {
+        const QString& mountPoint = it.key();
+        const QString& sessionName = it.value();
+        QDir dir(mountPoint);
+        if (!dir.exists()) {
+            LOG_DEBUG("[ExplorerPanel] 远程挂载点不存在:" << mountPoint);
+            continue;
+        }
+
+        // 云图标 + 会话名/挂载点名
+        QString displayName = QString::fromUtf8("\xE2\x98\x81 ") +  // ☁
+                              (sessionName.isEmpty() ? dir.dirName() : sessionName);
+        QTreeWidgetItem* rootItem = new QTreeWidgetItem(m_fileTree);
+        rootItem->setText(0, displayName);
+        rootItem->setData(0, Qt::UserRole, mountPoint);
+        rootItem->setData(0, Qt::UserRole + 1, QStringLiteral("remoteMount"));
+        rootItem->setData(0, Qt::UserRole + 2, sessionName);  // 会话名
+        rootItem->setToolTip(0, tr("远程挂载: %1\n会话: %2").arg(mountPoint, sessionName));
+        rootItem->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
+        populateFileTree(rootItem, dir);
+        rootItem->setExpanded(true);
+    }
+
     m_fileTree->expandAll();
 
     // 更新路径显示
-    if (m_workspaceFolders.size() == 1) {
+    int totalRoots = m_workspaceFolders.size() + m_remoteMounts.size();
+    if (totalRoots == 1 && m_remoteMounts.isEmpty()) {
         QString displayPath = QDir(m_workspaceFolders.first()).absolutePath();
         if (displayPath.length() > 40) {
             displayPath = QStringLiteral("...") + displayPath.right(37);
         }
         m_pathLabel->setText(displayPath);
         m_pathLabel->setToolTip(QDir(m_workspaceFolders.first()).absolutePath());
+    } else if (totalRoots == 1 && m_workspaceFolders.isEmpty()) {
+        m_pathLabel->setText(tr("远程: %1").arg(m_remoteMounts.constBegin().value()));
+        m_pathLabel->setToolTip(m_remoteMounts.constBegin().key());
     } else {
-        m_pathLabel->setText(tr("工作区 (%1 个文件夹)").arg(m_workspaceFolders.size()));
-        m_pathLabel->setToolTip(m_workspaceFolders.join(QStringLiteral("\n")));
+        m_pathLabel->setText(tr("工作区 (%1 本地 + %2 远程)")
+                                 .arg(m_workspaceFolders.size())
+                                 .arg(m_remoteMounts.size()));
+        m_pathLabel->setToolTip(m_workspaceFolders.join(QStringLiteral("\n")) +
+                                QStringLiteral("\n[Remote] ") + m_remoteMounts.keys().join(QStringLiteral("\n[Remote] ")));
     }
 
-    LOG_DEBUG("[ExplorerPanel] 文件树加载完成: " << m_workspaceFolders.size() << " 个文件夹");
+    LOG_DEBUG("[ExplorerPanel] 文件树加载完成: " << m_workspaceFolders.size()
+              << " 本地 + " << m_remoteMounts.size() << " 远程");
+}
+
+// ============================================================
+// P3-M01 子项4: 远程挂载点管理
+// ============================================================
+
+void ExplorerPanel::addRemoteMount(const QString& mountPoint, const QString& sessionName)
+{
+    if (mountPoint.isEmpty()) return;
+    QString mp = QDir(mountPoint).absolutePath();
+    m_remoteMounts[mp] = sessionName;
+    refreshFileList();
+    LOG_INFO("[ExplorerPanel] 添加远程挂载点: " << mp.toStdString()
+             << " (session=" << sessionName.toStdString() << ")");
+}
+
+void ExplorerPanel::removeRemoteMount(const QString& mountPoint)
+{
+    if (mountPoint.isEmpty()) return;
+    QString mp = QDir(mountPoint).absolutePath();
+    if (m_remoteMounts.remove(mp) > 0) {
+        refreshFileList();
+        LOG_INFO("[ExplorerPanel] 移除远程挂载点: " << mp.toStdString());
+    }
 }
 
 void ExplorerPanel::populateFileTree(QTreeWidgetItem* parentItem, const QDir& dir)
@@ -248,7 +411,16 @@ void ExplorerPanel::populateFileTree(QTreeWidgetItem* parentItem, const QDir& di
         fileItem->setText(0, fileIcon(suffix) + fi.fileName());
         fileItem->setData(0, Qt::UserRole, fi.absoluteFilePath());
         fileItem->setData(0, Qt::UserRole + 1, QStringLiteral("file"));
-        fileItem->setToolTip(0, fi.absoluteFilePath());
+        // P3-M05: 文件 tooltip 显示路径 + 修改时间 + 大小（使用本地化格式）
+        // 通过 QLocale::currentLocale() 适配中英文环境下的日期/数字呈现
+        QString modTime = QLocale().toString(
+            fi.lastModified(), QStringLiteral("yyyy-MM-dd hh:mm:ss"));
+        QString sizeStr = QLocale().toString(fi.size());
+        fileItem->setToolTip(0,
+            QStringLiteral("%1\n%2: %3\n%4: %5")
+                .arg(fi.absoluteFilePath(),
+                     tr("修改时间"), modTime,
+                     tr("大小"), sizeStr));
     }
 }
 
@@ -430,6 +602,11 @@ bool ExplorerPanel::eventFilter(QObject* obj, QEvent* event)
             return true;  // 事件已处理，阻止 QTreeWidget 默认行为（默认会移动 item）
         }
     }
+    // V2.1: 拦截大纲标题栏的鼠标点击 → 切换折叠/展开
+    if (obj == m_outlineHeader && event->type() == QEvent::MouseButtonPress) {
+        onOutlineHeaderClicked();
+        return true;  // 阻止事件传播
+    }
     return QWidget::eventFilter(obj, event);
 }
 
@@ -491,4 +668,159 @@ bool ExplorerPanel::handleTreeDropEvent(QDropEvent* event)
     emit fileMoveRequested(sourcePath, targetDir);
     event->accept();
     return true;
+}
+
+// ============================================================
+// V2.1: 大纲区域（嵌入文件树下方，VSCode 风格）
+// ============================================================
+
+bool ExplorerPanel::isOutlineSupported(const QString& filePath)
+{
+    // V2.1 M6 修复：使用 OutlinePanel::supportedSuffixes() 单一数据源，消除重复
+    QFileInfo fi(filePath);
+    QString suffix = fi.suffix().toLower();
+    return OutlinePanel::supportedSuffixes().contains(suffix);
+}
+
+void ExplorerPanel::updateOutline(const QString& filePath, const QList<QVariantMap>& symbols)
+{
+    // V2.1: 更新大纲符号（LSP documentSymbol 响应）
+    if (!m_outlineSection) return;
+
+    // 仅支持大纲的文件类型才展开显示
+    bool supported = isOutlineSupported(filePath);
+    if (!supported) {
+        setOutlineExpanded(false);
+        m_outlineSection->clearOutline();
+        return;
+    }
+
+    m_outlineSection->updateOutline(filePath, symbols);
+
+    // V2.1 H4 修复：有符号数据时自动展开，但用户手动折叠过则尊重用户意图
+    if (!symbols.isEmpty() && !m_userCollapsedOutline) {
+        setOutlineExpanded(true);
+    }
+}
+
+void ExplorerPanel::updateOutlineFromText(const QString& filePath, const QString& content)
+{
+    // V2.1: 离线正则扫描更新大纲（无 LSP 时的 fallback）
+    if (!m_outlineSection) return;
+
+    bool supported = isOutlineSupported(filePath);
+    if (!supported) {
+        setOutlineExpanded(false);
+        m_outlineSection->clearOutline();
+        return;
+    }
+
+    // V2.1 H4 修复：乐观展开仅当用户未手动折叠时
+    if (!m_userCollapsedOutline) {
+        setOutlineExpanded(true);
+    }
+    m_outlineSection->updateOutlineFromText(filePath, content);
+}
+
+void ExplorerPanel::clearOutline()
+{
+    // V2.1: 清空大纲并折叠（文件关闭时调用）
+    if (m_outlineSection) {
+        m_outlineSection->clearOutline();
+    }
+    setOutlineExpanded(false);
+}
+
+void ExplorerPanel::resetOutlineFilePath(const QString& filePath)
+{
+    // V2.1 C3 修复：LSP 异步请求期间立即同步文件路径，防止点击大纲跳转到错误文件
+    // 场景：用户切换 A→B 文件，LSP 还在请求 A 的符号，此时 m_filePath 仍为 A，
+    //       若用户在 B 文件期间点击残留的 A 符号节点，会跳转到 A 的位置。
+    // 此方法在发起 LSP 请求前同步路径，并清空树（消除残留符号）。
+    if (m_outlineSection) {
+        m_outlineSection->resetFilePath(filePath);
+    }
+}
+
+void ExplorerPanel::setOutlineExpanded(bool expanded)
+{
+    // V2.1: 切换大纲区域折叠/展开状态
+    if (m_outlineExpanded == expanded) return;
+    m_outlineExpanded = expanded;
+
+    if (m_outlineSection) {
+        m_outlineSection->setVisible(expanded);
+    }
+    updateOutlineHeaderArrow();
+
+    // V2.1: 通过 QSplitter 调整文件树/大纲区域的高度比例
+    if (m_contentSplitter) {
+        int totalH = m_contentSplitter->height();
+        if (totalH <= 0) totalH = 400;  // 首次展开时 splitter 尚未显示，用默认值
+        if (expanded) {
+            // 展开：文件树 55% : 大纲 45%（最小 150px）
+            int outlineH = qMax(150, static_cast<int>(totalH * 0.45));
+            int treeH = qMax(80, totalH - outlineH);
+            m_contentSplitter->setSizes({treeH, outlineH});
+        } else {
+            // 折叠：文件树占满，大纲高度 0（标题栏仍可见）
+            m_contentSplitter->setSizes({totalH, 0});
+        }
+    }
+}
+
+void ExplorerPanel::updateOutlineHeaderArrow()
+{
+    // V2.1: 更新标题栏箭头方向（Qt 原生矢量箭头，跨字体兼容）
+    if (m_outlineArrow) {
+        m_outlineArrow->setArrowType(m_outlineExpanded
+            ? Qt::DownArrow    // ▼ 展开
+            : Qt::RightArrow); // ▶ 折叠
+    }
+}
+
+void ExplorerPanel::onOutlineHeaderClicked()
+{
+    // V2.1: 标题栏点击 → 切换折叠/展开
+    setOutlineExpanded(!m_outlineExpanded);
+    // V2.1 H4 修复：记录用户手动操作
+    // - 折叠：设置标志，后续符号更新不再自动展开
+    // - 展开：清除标志，恢复自动展开行为
+    m_userCollapsedOutline = !m_outlineExpanded;
+}
+
+// ============================================================
+// V2.1 M2 修复：splitter 高度比例持久化到磁盘
+// ============================================================
+
+void ExplorerPanel::saveState()
+{
+    // 保存 splitter 高度比例到 ConfigManager（QSettings）
+    if (m_contentSplitter) {
+        QByteArray sizes = m_contentSplitter->saveState();
+        ConfigManager::instance().setValue(
+            QStringLiteral("explorer/splitterSizes"),
+            QString::fromLatin1(sizes.toBase64()));
+    }
+}
+
+void ExplorerPanel::loadState()
+{
+    // 恢复 splitter 高度比例
+    if (!m_contentSplitter) return;
+
+    QString saved = ConfigManager::instance().getValue(
+        QStringLiteral("explorer/splitterSizes")).toString();
+    if (saved.isEmpty()) return;
+
+    QByteArray sizes = QByteArray::fromBase64(saved.toLatin1());
+    m_contentSplitter->restoreState(sizes);
+}
+
+void ExplorerPanel::saveOutlineState()
+{
+    // V2.1 M3: 透传给 OutlinePanel 保存折叠状态
+    if (m_outlineSection) {
+        m_outlineSection->saveExpansionStatesToDisk();
+    }
 }

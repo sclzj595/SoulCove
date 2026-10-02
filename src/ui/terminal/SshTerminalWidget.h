@@ -23,6 +23,9 @@ struct SshRemoteSession {
     QWidget*     pageWidget = nullptr;
     QString      connectionId;
     QString      displayName;
+    // P3-M01 子项2: tmux 会话持久化
+    QString      tmuxSessionName;     ///< 当前会话绑定的 tmux session 名（空表示未启用）
+    bool         useTmux = false;     ///< 是否已启用 tmux
 };
 
 /// @brief SSH 远程终端组件
@@ -56,6 +59,17 @@ public:
 
     /// 关闭指定标签页
     void closeTab(int index);
+
+    // === P3-M01 子项2: 远程终端持久化（tmux）===
+    /// 检测远程主机是否安装 tmux（连接成功后调用）
+    /// @return tmux 可执行文件路径，未安装返回空字符串
+    QString detectTmux(SshClient* client) const;
+    /// 连接已建立的 Shell 通道后，附加到已有 tmux 会话
+    /// @param sessionName 目标 tmux 会话名
+    void attachTmuxSession(const QString& sessionName);
+    /// 连接已建立的 Shell 通道后，新建 tmux 会话
+    /// @param sessionName 新会话名（必须非空）
+    void startTmuxSession(const QString& sessionName);
 
 signals:
     /// 请求打开连接配置对话框
@@ -94,6 +108,10 @@ private:
     QList<SshRemoteSession> m_sessions;
     int m_sessionCounter = 0;
     bool m_hasShownConfig = false;  // 是否已弹出过配置对话框（避免重复弹）
+
+    // P3-M01 子项2: 当前正在连接的会话绑定的 tmux 配置（connectToHost 期间临时使用）
+    QString m_pendingTmuxSessionName;
+    bool    m_pendingUseTmux = false;
 
 protected:
     void showEvent(QShowEvent* event) override;

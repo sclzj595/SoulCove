@@ -64,28 +64,98 @@ QString GitManager::runGitCommand(const QStringList& args, int timeout)
     return QString::fromUtf8(output).trimmed();
 }
 
+// ========== P2-H03: 指定工作目录执行命令（不修改单例状态）==========
+
+QString GitManager::runGitCommandInDir(const QString& workDir, const QStringList& args, int timeout)
+{
+    QProcess process;
+    process.setProgram(QStringLiteral("git"));
+    process.setArguments(args);
+
+    if (!workDir.isEmpty()) {
+        process.setWorkingDirectory(workDir);
+    }
+
+    process.start();
+    if (!process.waitForStarted()) {
+        LOG_DEBUG_S("GitManager", "runGitCommandInDir", "git 进程启动失败");
+        return QString();
+    }
+
+    if (!process.waitForFinished(timeout)) {
+        process.kill();
+        process.waitForFinished(2000);
+        LOG_DEBUG_S("GitManager", "runGitCommandInDir", "命令超时:" << args.join(QLatin1Char(' ')));
+        return QString();
+    }
+
+    QByteArray output = process.readAllStandardOutput();
+    QByteArray errorOutput = process.readAllStandardError();
+
+    if (process.exitCode() != 0 && errorOutput.isEmpty()) {
+        return QString::fromUtf8(output).trimmed();
+    }
+
+    if (!errorOutput.isEmpty()) {
+        LOG_DEBUG_S("GitManager", "runGitCommandInDir", "stderr:" << QString::fromUtf8(errorOutput).trimmed());
+    }
+
+    return QString::fromUtf8(output).trimmed();
+}
+
 // ========== 仓库状态 ==========
 
 bool GitManager::isGitRepo() const
 {
-    // const 方法中需要 const_cast 因为 runGitCommand 非const
-    auto result = const_cast<GitManager*>(this)->runGitCommand(
-        {QStringLiteral("rev-parse"), QStringLiteral("--is-inside-work-tree")});
-    return result.trimmed() == QStringLiteral("true");
+    return isGitRepo(m_workingDir);
 }
 
 QString GitManager::currentBranch() const
 {
-    auto result = const_cast<GitManager*>(this)->runGitCommand(
+    return currentBranch(m_workingDir);
+}
+
+QStringList GitManager::branches() const
+{
+    return branches(m_workingDir);
+}
+
+QStringList GitManager::changedFiles() const
+{
+    QList<GitFileStatus> statuses = const_cast<GitManager*>(this)->fileStatuses(m_workingDir);
+    QStringList files;
+    for (const GitFileStatus& fs : statuses) {
+        files.append(fs.filePath);
+    }
+    return files;
+}
+
+QList<GitFileStatus> GitManager::fileStatuses()
+{
+    return fileStatuses(m_workingDir);
+}
+
+// === P2-H03: 显式 workDir 重载 ===
+
+bool GitManager::isGitRepo(const QString& workDir) const
+{
+    auto result = const_cast<GitManager*>(this)->runGitCommandInDir(workDir,
+        {QStringLiteral("rev-parse"), QStringLiteral("--is-inside-work-tree")});
+    return result.trimmed() == QStringLiteral("true");
+}
+
+QString GitManager::currentBranch(const QString& workDir) const
+{
+    auto result = const_cast<GitManager*>(this)->runGitCommandInDir(workDir,
         {QStringLiteral("branch"), QStringLiteral("--show-current")});
     if (result.isEmpty())
         return tr("(未命名分支)");
     return result;
 }
 
-QStringList GitManager::branches() const
+QStringList GitManager::branches(const QString& workDir) const
 {
-    auto result = const_cast<GitManager*>(this)->runGitCommand(
+    auto result = const_cast<GitManager*>(this)->runGitCommandInDir(workDir,
         {QStringLiteral("branch"), QStringLiteral("-a")});
     if (result.isEmpty())
         return {};
@@ -102,21 +172,12 @@ QStringList GitManager::branches() const
     return list;
 }
 
-QStringList GitManager::changedFiles() const
-{
-    QList<GitFileStatus> statuses = const_cast<GitManager*>(this)->fileStatuses();
-    QStringList files;
-    for (const GitFileStatus& fs : statuses) {
-        files.append(fs.filePath);
-    }
-    return files;
-}
-
-QList<GitFileStatus> GitManager::fileStatuses()
+QList<GitFileStatus> GitManager::fileStatuses(const QString& workDir)
 {
     QList<GitFileStatus> result;
 
-    auto output = runGitCommand({QStringLiteral("status"), QStringLiteral("--porcelain")});
+    auto output = runGitCommandInDir(workDir,
+        {QStringLiteral("status"), QStringLiteral("--porcelain")});
     if (output.isEmpty())
         return result;
 
@@ -266,4 +327,62 @@ bool GitManager::push()
     emit operationFinished(tr("推送"), ok, output);
     if (ok) emit repoChanged();
     return ok;
+}
+
+// ========== P2-H03 子项2: 提交历史 ==========
+
+QString GitManager::commitDiff(const QString& workDir, const QString& commitHash)
+{
+    if (commitHash.isEmpty())
+        return QString();
+
+    // git show <hash> — 显示提交的元信息 + diff
+    return runGitCommandInDir(workDir,
+        {QStringLiteral("show"), commitHash}, 15000);
+}
+
+QList<GitCommit> GitManager::logDetailed(const QString& workDir, int limit)
+{
+    QList<GitCommit> result;
+
+    // 使用唯一分隔符避免与提交消息中的字符冲突
+    // 字段顺序: hash | author | email | timestamp(unix) | message
+    const QString sep = QStringLiteral("\x1f");  // ASCII Unit Separator
+    const QString fmt = QStringLiteral("%H") + sep +
+                        QStringLiteral("%an") + sep +
+                        QStringLiteral("%ae") + sep +
+                        QStringLiteral("%at") + sep +
+                        QStringLiteral("%B") + QStringLiteral("\x1e");  // ASCII Record Separator 作为提交结束符
+
+    auto output = runGitCommandInDir(workDir, {
+        QStringLiteral("log"),
+        QStringLiteral("-n") + QString::number(limit),
+        QStringLiteral("--pretty=format:") + fmt
+    });
+
+    if (output.isEmpty())
+        return result;
+
+    const QStringList records = output.split(QStringLiteral("\x1e"), Qt::SkipEmptyParts);
+    for (const QString& record : records) {
+        const QStringList fields = record.split(sep);
+        if (fields.size() < 5) continue;
+
+        GitCommit commit;
+        commit.hash    = fields[0].trimmed();
+        commit.author  = fields[1];
+        commit.email   = fields[2];
+        bool tsOk = false;
+        qint64 ts = fields[3].toLongLong(&tsOk);
+        if (tsOk) {
+            commit.time = QDateTime::fromSecsSinceEpoch(ts);
+        }
+        // 提交消息保留原始换行，去除首尾空白
+        commit.message = fields[4].trimmed();
+
+        if (!commit.hash.isEmpty())
+            result.append(commit);
+    }
+
+    return result;
 }

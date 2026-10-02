@@ -50,6 +50,14 @@ public:
 
     /// 补全弹窗是否获得焦点（用于focusOut判断）
     virtual bool isCompleterFocused() const = 0;
+
+    // ========== H3: 成员补全自动触发（. / -> / ::）==========
+    /// 进入成员补全模式 — 跳过最小前缀检查，允许空前缀显示 LSP 候选
+    virtual void triggerMemberCompletion() {}
+    /// 退出成员补全模式
+    virtual void clearMemberCompletion() {}
+    /// 当前是否处于成员补全模式
+    virtual bool isMemberCompletionMode() const { return false; }
 };
 
 #endif // ICOMPLETER_H

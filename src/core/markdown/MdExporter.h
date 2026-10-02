@@ -57,6 +57,11 @@ public:
     QString toHtmlString(const QString& markdown,
                          const ExportOptions& options = ExportOptions());
 
+    /// @brief P3-M02 子项4: 转换 Markdown 为富文本 HTML 字符串（用于剪贴板复制到 Word/邮件等）
+    /// @param markdown 原始 Markdown 文本
+    /// @return 带内联样式的完整 HTML 字符串（适合 QTextDocument/QClipboard 渲染）
+    QString copyAsRichText(const QString& markdown);
+
     /// @brief 获取支持的文件过滤器（用于保存对话框）
     static QString fileFilter();
 

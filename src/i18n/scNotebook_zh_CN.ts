@@ -108,10 +108,6 @@
         <translation>源代码管理</translation>
     </message>
     <message>
-        <source>Extensions</source>
-        <translation>扩展</translation>
-    </message>
-    <message>
         <source>Welcome</source>
         <translation>欢迎</translation>
     </message>
@@ -737,6 +733,63 @@
     <message>
         <source>提示</source>
         <translation></translation>
+    </message>
+</context>
+<context>
+    <name>TitleBar</name>
+    <message>
+        <source>视图</source>
+        <translation>视图</translation>
+    </message>
+    <message>
+        <source>(V)</source>
+        <translation>(V)</translation>
+    </message>
+    <message>
+        <source>视图与语言切换</source>
+        <translation>视图与语言切换</translation>
+    </message>
+    <message>
+        <source>语言</source>
+        <translation>语言</translation>
+    </message>
+    <message>
+        <source>简体中文</source>
+        <translation>简体中文</translation>
+    </message>
+    <message>
+        <source>English</source>
+        <translation>English</translation>
+    </message>
+    <message>
+        <source>跟随系统</source>
+        <translation>跟随系统</translation>
+    </message>
+</context>
+<context>
+    <name>Widget</name>
+    <message>
+        <source>语言已切换，需要重启应用以完全生效</source>
+        <translation>语言已切换，需要重启应用以完全生效</translation>
+    </message>
+    <message>
+        <source>当前时间</source>
+        <translation>当前时间</translation>
+    </message>
+    <message>
+        <source>提示</source>
+        <translation>提示</translation>
+    </message>
+</context>
+<context>
+    <name>ExplorerPanel</name>
+    <message>
+        <source>修改时间</source>
+        <translation>修改时间</translation>
+    </message>
+    <message>
+        <source>大小</source>
+        <translation>大小</translation>
     </message>
 </context>
 </TS>

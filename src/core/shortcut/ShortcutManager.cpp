@@ -1,4 +1,5 @@
 #include "core/shortcut/ShortcutManager.h"
+#include "core/config/ConfigManager.h"
 #include "Logger.hpp"
 
 #include <QFile>
@@ -214,6 +215,127 @@ void ShortcutManager::registerDefaults()
         QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P),
         tr("打开全局命令搜索框")
     };
+
+    // ===== P2-H05 子项1: VSCode 预设方案补充命令 =====
+    // 这些命令在原项目中尚无默认绑定，注册为独立的快捷键条目，
+    // 配合 applyPreset(VSCode) 使用。默认键值即采用 VSCode 兼容值，
+    // 这样切换到 VSCode 预设不会因冲突导致 setShortcut 失败。
+    m_shortcuts[QStringLiteral("editor.copy")] = {
+        QStringLiteral("editor.copy"),
+        tr("复制"),
+        QStringLiteral("编辑"),
+        QKeySequence(Qt::CTRL | Qt::Key_C),
+        QKeySequence(Qt::CTRL | Qt::Key_C),
+        tr("复制选中内容到剪贴板")
+    };
+
+    m_shortcuts[QStringLiteral("editor.paste")] = {
+        QStringLiteral("editor.paste"),
+        tr("粘贴"),
+        QStringLiteral("编辑"),
+        QKeySequence(Qt::CTRL | Qt::Key_V),
+        QKeySequence(Qt::CTRL | Qt::Key_V),
+        tr("粘贴剪贴板内容")
+    };
+
+    m_shortcuts[QStringLiteral("editor.cut")] = {
+        QStringLiteral("editor.cut"),
+        tr("剪切"),
+        QStringLiteral("编辑"),
+        QKeySequence(Qt::CTRL | Qt::Key_X),
+        QKeySequence(Qt::CTRL | Qt::Key_X),
+        tr("剪切选中内容到剪贴板")
+    };
+
+    m_shortcuts[QStringLiteral("editor.gotoLine")] = {
+        QStringLiteral("editor.gotoLine"),
+        tr("跳转到行"),
+        QStringLiteral("编辑"),
+        QKeySequence(Qt::CTRL | Qt::Key_G),
+        QKeySequence(Qt::CTRL | Qt::Key_G),
+        tr("跳转到指定行号")
+    };
+
+    m_shortcuts[QStringLiteral("editor.commentLine")] = {
+        QStringLiteral("editor.commentLine"),
+        tr("切换行注释"),
+        QStringLiteral("编辑"),
+        QKeySequence(Qt::CTRL | Qt::Key_Slash),
+        QKeySequence(Qt::CTRL | Qt::Key_Slash),
+        tr("注释/取消注释当前行")
+    };
+
+    m_shortcuts[QStringLiteral("editor.formatDocument")] = {
+        QStringLiteral("editor.formatDocument"),
+        tr("格式化文档 (VSCode)"),
+        QStringLiteral("编辑"),
+        QKeySequence(Qt::SHIFT | Qt::ALT | Qt::Key_F),
+        QKeySequence(Qt::SHIFT | Qt::ALT | Qt::Key_F),
+        tr("VSCode 风格格式化文档（Shift+Alt+F）")
+    };
+
+    m_shortcuts[QStringLiteral("editor.gotoDefinition")] = {
+        QStringLiteral("editor.gotoDefinition"),
+        tr("跳转到定义"),
+        QStringLiteral("编辑"),
+        QKeySequence(Qt::Key_F12),
+        QKeySequence(Qt::Key_F12),
+        tr("跳转到符号定义处")
+    };
+
+    m_shortcuts[QStringLiteral("editor.gotoImplementation")] = {
+        QStringLiteral("editor.gotoImplementation"),
+        tr("跳转到实现"),
+        QStringLiteral("编辑"),
+        QKeySequence(Qt::CTRL | Qt::Key_F12),
+        QKeySequence(Qt::CTRL | Qt::Key_F12),
+        tr("跳转到符号实现处")
+    };
+
+    m_shortcuts[QStringLiteral("editor.quickOpen")] = {
+        QStringLiteral("editor.quickOpen"),
+        tr("快速打开文件"),
+        QStringLiteral("全局"),
+        QKeySequence(Qt::CTRL | Qt::Key_P),
+        QKeySequence(Qt::CTRL | Qt::Key_P),
+        tr("按文件名快速打开")
+    };
+
+    m_shortcuts[QStringLiteral("view.toggleSidebar")] = {
+        QStringLiteral("view.toggleSidebar"),
+        tr("切换侧边栏"),
+        QStringLiteral("视图"),
+        QKeySequence(Qt::CTRL | Qt::Key_B),
+        QKeySequence(Qt::CTRL | Qt::Key_B),
+        tr("显示/隐藏侧边栏")
+    };
+
+    m_shortcuts[QStringLiteral("view.toggleFullScreen")] = {
+        QStringLiteral("view.toggleFullScreen"),
+        tr("切换全屏"),
+        QStringLiteral("视图"),
+        QKeySequence(Qt::Key_F11),
+        QKeySequence(Qt::Key_F11),
+        tr("切换全屏显示")
+    };
+
+    m_shortcuts[QStringLiteral("navigation.goBack")] = {
+        QStringLiteral("navigation.goBack"),
+        tr("后退"),
+        QStringLiteral("导航"),
+        QKeySequence(Qt::ALT | Qt::Key_Left),
+        QKeySequence(Qt::ALT | Qt::Key_Left),
+        tr("后退到上一个光标位置")
+    };
+
+    m_shortcuts[QStringLiteral("navigation.goForward")] = {
+        QStringLiteral("navigation.goForward"),
+        tr("前进"),
+        QStringLiteral("导航"),
+        QKeySequence(Qt::ALT | Qt::Key_Right),
+        QKeySequence(Qt::ALT | Qt::Key_Right),
+        tr("前进到下一个光标位置")
+    };
 }
 
 // ============================================================
@@ -396,6 +518,13 @@ void ShortcutManager::loadConfig()
     } catch (const std::exception& e) {
         LOG_ERROR_S("ShortcutManager", "loadConfig", "加载配置异常:" << e.what());
     }
+
+    // P2-H05 子项1: 加载持久化的预设方案
+    int presetVal = ConfigManager::instance().getValue(
+        QStringLiteral("Shortcuts/preset"), static_cast<int>(ShortcutPreset::Default)).toInt();
+    m_currentPreset = (presetVal == static_cast<int>(ShortcutPreset::VSCode))
+                          ? ShortcutPreset::VSCode
+                          : ShortcutPreset::Default;
 }
 
 void ShortcutManager::reloadConfig()
@@ -409,4 +538,249 @@ void ShortcutManager::reloadConfig()
     loadConfig();
 
     LOG_DEBUG_S("ShortcutManager", "reloadConfig", "配置已重新加载");
+}
+
+// ============================================================
+// P2-H05 子项1: 预设方案切换
+// ============================================================
+
+QString ShortcutManager::presetName(ShortcutPreset preset) const
+{
+    switch (preset) {
+    case ShortcutPreset::VSCode:   return tr("VSCode 预设");
+    case ShortcutPreset::Default:  [[fallthrough]];
+    default:                       return tr("默认预设");
+    }
+}
+
+QString ShortcutManager::resolvePresetId(const QString& specId) const
+{
+    // spec 风格 ID（editor.*）映射到项目中实际注册的命令 ID
+    // VSCode 预设规范使用 editor.* 命名，而项目原有命令使用 file.*/edit.*/terminal.* 命名
+    static const QMap<QString, QString> aliases = {
+        {QStringLiteral("editor.undo"),           QStringLiteral("edit.undo")},
+        {QStringLiteral("editor.redo"),           QStringLiteral("edit.redo")},
+        {QStringLiteral("editor.find"),           QStringLiteral("edit.find")},
+        {QStringLiteral("editor.replace"),        QStringLiteral("edit.replace")},
+        {QStringLiteral("editor.save"),           QStringLiteral("file.save")},
+        {QStringLiteral("editor.newFile"),        QStringLiteral("file.new")},
+        {QStringLiteral("editor.openFile"),       QStringLiteral("file.open")},
+        {QStringLiteral("editor.commandPalette"), QStringLiteral("command.palette")},
+        {QStringLiteral("view.toggleTerminal"),   QStringLiteral("terminal.toggle")},
+    };
+
+    if (m_shortcuts.contains(specId)) return specId;
+    return aliases.value(specId, specId);
+}
+
+void ShortcutManager::applyPreset(ShortcutPreset preset)
+{
+    // Default 预设：等价于全部重置为项目默认快捷键
+    if (preset == ShortcutPreset::Default) {
+        resetAllToDefault();
+        m_currentPreset = ShortcutPreset::Default;
+        ConfigManager::instance().setValue(
+            QStringLiteral("Shortcuts/preset"), static_cast<int>(ShortcutPreset::Default));
+        emit presetChanged(m_currentPreset);
+        LOG_INFO_S("ShortcutManager", "applyPreset", "已切换到默认预设");
+        return;
+    }
+
+    // VSCode 预设：按规范批量覆盖关键命令
+    // 规范中的 editor.* ID 通过 resolvePresetId 解析为实际注册的命令 ID
+    struct PresetEntry { const char* specId; Qt::KeyboardModifiers mods; int key; };
+    static const PresetEntry vscodeEntries[] = {
+        { "editor.copy",               Qt::ControlModifier,                       Qt::Key_C },
+        { "editor.paste",              Qt::ControlModifier,                       Qt::Key_V },
+        { "editor.cut",                Qt::ControlModifier,                       Qt::Key_X },
+        { "editor.undo",               Qt::ControlModifier,                       Qt::Key_Z },
+        { "editor.redo",               Qt::ControlModifier,                       Qt::Key_Y },
+        { "editor.find",               Qt::ControlModifier,                       Qt::Key_F },
+        { "editor.replace",            Qt::ControlModifier,                       Qt::Key_H },
+        { "editor.gotoLine",           Qt::ControlModifier,                       Qt::Key_G },
+        { "editor.commentLine",        Qt::ControlModifier,                       Qt::Key_Slash },
+        { "editor.formatDocument",     Qt::ShiftModifier | Qt::AltModifier,       Qt::Key_F },
+        { "editor.gotoDefinition",     Qt::NoModifier,                            Qt::Key_F12 },
+        { "editor.gotoImplementation", Qt::ControlModifier,                       Qt::Key_F12 },
+        { "editor.quickOpen",          Qt::ControlModifier,                       Qt::Key_P },
+        { "editor.commandPalette",     Qt::ControlModifier | Qt::ShiftModifier,   Qt::Key_P },
+        { "editor.save",               Qt::ControlModifier,                       Qt::Key_S },
+        { "editor.newFile",            Qt::ControlModifier,                       Qt::Key_N },
+        { "editor.openFile",           Qt::ControlModifier,                       Qt::Key_O },
+        { "view.toggleSidebar",        Qt::ControlModifier,                       Qt::Key_B },
+        { "view.toggleTerminal",       Qt::ControlModifier,                       Qt::Key_QuoteLeft },
+        { "view.toggleFullScreen",     Qt::NoModifier,                            Qt::Key_F11 },
+        { "navigation.goBack",         Qt::AltModifier,                           Qt::Key_Left },
+        { "navigation.goForward",      Qt::AltModifier,                           Qt::Key_Right },
+    };
+
+    int appliedCount = 0;
+    int skippedCount = 0;
+    for (const auto& e : vscodeEntries) {
+        QString actualId = resolvePresetId(QString::fromLatin1(e.specId));
+        QKeySequence targetSeq(e.mods | e.key);
+
+        if (!m_shortcuts.contains(actualId)) {
+            LOG_WARN_S("ShortcutManager", "applyPreset",
+                "VSCode 预设跳过未注册命令:" << e.specId << "→" << actualId);
+            ++skippedCount;
+            continue;
+        }
+
+        // 直接写入以绕过冲突检测（预设切换属于用户显式操作，冲突由设计保证不存在）
+        // 同 spec 多条目可能解析到同一 actualId（如 editor.save→file.save 已覆盖默认），
+        // 此时按顺序写入即可，最终值为最后一条
+        QKeySequence oldKey = m_shortcuts[actualId].currentKey;
+        m_shortcuts[actualId].currentKey = targetSeq;
+        emit shortcutChanged(actualId, oldKey, targetSeq);
+        ++appliedCount;
+    }
+
+    m_currentPreset = ShortcutPreset::VSCode;
+    ConfigManager::instance().setValue(
+        QStringLiteral("Shortcuts/preset"), static_cast<int>(ShortcutPreset::VSCode));
+    saveConfig();
+    emit presetChanged(m_currentPreset);
+
+    LOG_INFO_S("ShortcutManager", "applyPreset",
+        "已切换到 VSCode 预设，应用" << appliedCount << "项，跳过" << skippedCount << "项");
+}
+
+// ============================================================
+// P2-H05 子项4: 导出/导入 JSON
+// ============================================================
+
+bool ShortcutManager::exportToJson(const QString& filePath) const
+{
+    try {
+        QJsonArray arr;
+        for (auto it = m_shortcuts.constBegin(); it != m_shortcuts.constEnd(); ++it) {
+            arr.append(it.value().toJson());
+        }
+
+        QJsonObject root;
+        root[QStringLiteral("version")] = 1;
+        root[QStringLiteral("preset")] = static_cast<int>(m_currentPreset);
+        root[QStringLiteral("shortcuts")] = arr;
+
+        QFile file(filePath);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            LOG_WARN_S("ShortcutManager", "exportToJson", "无法写入文件:" << file.errorString());
+            return false;
+        }
+        QJsonDocument doc(root);
+        file.write(doc.toJson(QJsonDocument::Indented));
+        file.close();
+
+        LOG_INFO_S("ShortcutManager", "exportToJson", "已导出" << m_shortcuts.size() << "个快捷键到" << filePath);
+        return true;
+    } catch (const std::exception& e) {
+        LOG_ERROR_S("ShortcutManager", "exportToJson", "导出异常:" << e.what());
+        return false;
+    }
+}
+
+bool ShortcutManager::importFromJson(const QString& filePath)
+{
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        LOG_WARN_S("ShortcutManager", "importFromJson", "无法读取文件:" << file.errorString());
+        return false;
+    }
+
+    QJsonParseError parseError;
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
+    file.close();
+
+    if (parseError.error != QJsonParseError::NoError) {
+        LOG_WARN_S("ShortcutManager", "importFromJson", "JSON 解析失败:" << parseError.errorString());
+        return false;
+    }
+
+    QJsonObject root = doc.object();
+    QJsonArray arr = root.value(QStringLiteral("shortcuts")).toArray();
+    if (arr.isEmpty()) {
+        // 兼容旧格式：直接是数组
+        arr = doc.array();
+    }
+
+    int appliedCount = 0;
+    for (const QJsonValue& val : arr) {
+        if (!val.isObject()) continue;
+        ShortcutItem item = ShortcutItem::fromJson(val.toObject());
+        if (item.id.isEmpty() || !m_shortcuts.contains(item.id)) {
+            LOG_WARN_S("ShortcutManager", "importFromJson", "跳过未注册的快捷键ID:" << item.id);
+            continue;
+        }
+        QKeySequence oldKey = m_shortcuts[item.id].currentKey;
+        m_shortcuts[item.id].currentKey = item.currentKey;
+        emit shortcutChanged(item.id, oldKey, item.currentKey);
+        ++appliedCount;
+    }
+
+    // 同步预设字段（若存在）
+    int presetVal = root.value(QStringLiteral("preset")).toInt(
+        static_cast<int>(ShortcutPreset::Default));
+    m_currentPreset = (presetVal == static_cast<int>(ShortcutPreset::VSCode))
+                          ? ShortcutPreset::VSCode
+                          : ShortcutPreset::Default;
+    ConfigManager::instance().setValue(
+        QStringLiteral("Shortcuts/preset"), static_cast<int>(m_currentPreset));
+
+    saveConfig();
+    LOG_INFO_S("ShortcutManager", "importFromJson", "已导入" << appliedCount << "个快捷键");
+    return true;
+}
+
+QStringList ShortcutManager::checkImportConflicts(const QString& filePath) const
+{
+    QStringList result;
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        result << QStringLiteral("PARSE_ERROR");
+        return result;
+    }
+
+    QJsonParseError parseError;
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
+    file.close();
+
+    if (parseError.error != QJsonParseError::NoError) {
+        result << QStringLiteral("PARSE_ERROR");
+        return result;
+    }
+
+    QJsonObject root = doc.object();
+    QJsonArray arr = root.value(QStringLiteral("shortcuts")).toArray();
+    if (arr.isEmpty()) arr = doc.array();
+
+    // 收集本次导入会修改的 (id → key) 映射，模拟冲突检测
+    QMap<QString, QKeySequence> importedKeys;
+    for (const QJsonValue& val : arr) {
+        if (!val.isObject()) continue;
+        ShortcutItem item = ShortcutItem::fromJson(val.toObject());
+        if (item.id.isEmpty() || !m_shortcuts.contains(item.id)) continue;
+        importedKeys[item.id] = item.currentKey;
+    }
+
+    // 对每条导入项，检查与「其它已注册命令（不含自身和其它导入项）」的冲突
+    for (auto it = importedKeys.constBegin(); it != importedKeys.constEnd(); ++it) {
+        const QString& id = it.key();
+        const QKeySequence& key = it.value();
+        if (key.isEmpty()) continue;
+
+        for (auto mit = m_shortcuts.constBegin(); mit != m_shortcuts.constEnd(); ++mit) {
+            if (mit.key() == id) continue;            // 排除自身
+            if (importedKeys.contains(mit.key())) continue;  // 排除其它导入项
+
+            if (mit.value().currentKey == key) {
+                result << QStringLiteral("%1 ← %2 (与 %3 冲突)")
+                              .arg(id, key.toString(), mit.value().displayName);
+                break;
+            }
+        }
+    }
+
+    return result;
 }

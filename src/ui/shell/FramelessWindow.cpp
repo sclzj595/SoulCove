@@ -10,6 +10,22 @@
 #ifdef Q_OS_WIN
 #include <dwmapi.h>
 #include <windows.h>
+
+// P1: Win11 DWM 背景类型 API 兼容性定义
+// MinGW 11.2 的 dwmapi.h 不包含 Win11 的 DWM_SYSTEMBACKDROP_TYPE 常量，
+// 手动定义以支持在旧 SDK 上编译（值来自 Windows SDK）
+#ifndef DWMWA_SYSTEMBACKDROP_TYPE
+#define DWMWA_SYSTEMBACKDROP_TYPE 38
+#endif
+#ifndef DWM_SYSTEMBACKDROP_TYPE
+typedef enum DWM_SYSTEMBACKDROP_TYPE {
+    DWMSBT_AUTO = 0,
+    DWMSBT_NONE = 1,
+    DWMSBT_MAINWINDOW = 2,
+    DWMSBT_TRANSIENTWINDOW = 3,
+    DWMSBT_TABBEDWINDOW = 4
+} DWM_SYSTEMBACKDROP_TYPE;
+#endif
 #endif
 
 // ========== 构造 / 初始化 ==========
@@ -52,19 +68,23 @@ void FramelessWindow::applyAcrylicEffect()
 #ifdef Q_OS_WIN
     HWND hwnd = (HWND)winId();
 
-    // 修复：将 DWM 合成层扩展到整个客户区，与 WA_TranslucentBackground 配合，
+    // 修复 DWM 闪烁：将 DWM 合成层扩展到整个客户区，与 WA_TranslucentBackground 配合，
     // 消除拖拽/缩放时 DWM 合成层与 Qt 客户区各自独立重绘造成的撕裂
     MARGINS margins = { -1, -1, -1, -1 };  // -1 表示整窗扩展（毛玻璃）
     DwmExtendFrameIntoClientArea(hwnd, &margins);
 
-    // Win11 MICA 效果（22H2+）
-    DWM_SYSTEMBACKDROP_TYPE backdrop = DWMSBT_MAINWINDOW;
+    // 修复主题割裂：禁用 Win11 MICA 背景效果。
+    // MICA 使用系统壁纸色调，与自定义紫色暗黑主题不匹配，
+    // 拖拽/缩放时 DWM 合成层先于 Qt paintEvent 绘制，导致系统色闪烁。
+    // 改为 DWMSBT_NONE（无系统背景），完全依赖 paintEvent 的纯色主题填充，
+    // 确保窗口背景与编辑器主题视觉统一。
+    DWM_SYSTEMBACKDROP_TYPE backdrop = DWMSBT_NONE;
     DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
 
-    // Win10 BlurBehind 磨砂效果（兼容）
+    // Win10 BlurBehind 磨砂效果（兼容）— 同样禁用，避免系统色透过
     DWM_BLURBEHIND bb = {};
-    bb.dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION;
-    bb.fEnable = TRUE;
+    bb.dwFlags = DWM_BB_ENABLE;
+    bb.fEnable = FALSE;
     bb.hRgnBlur = nullptr;
     DwmEnableBlurBehindWindow(hwnd, &bb);
 

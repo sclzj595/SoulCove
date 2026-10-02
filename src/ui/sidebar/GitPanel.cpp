@@ -1,4 +1,5 @@
 #include "ui/sidebar/GitPanel.h"
+#include "ui/sidebar/GitHistoryPanel.h"
 #include "core/vcs/GitManager.h"
 
 #include <QVBoxLayout>
@@ -18,35 +19,60 @@ GitPanel::GitPanel(QWidget* parent)
             this, &GitPanel::onRepoChanged);
     connect(&GitManager::instance(), &GitManager::operationFinished,
             this, &GitPanel::onOperationFinished);
+
+    // P2-H03 子项2: 转发历史面板的 diff 请求信号
+    if (m_historyPanel) {
+        connect(m_historyPanel, &GitHistoryPanel::commitDiffRequested,
+                this, &GitPanel::commitDiffRequested);
+    }
+}
+
+void GitPanel::setWorkspaceRoot(const QString& root)
+{
+    if (m_historyPanel) {
+        m_historyPanel->setWorkspaceRoot(root);
+    }
 }
 
 void GitPanel::setupUi()
 {
     auto* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(6, 4, 4, 4);
-    mainLayout->setSpacing(4);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
+    mainLayout->setSpacing(0);
+
+    // === P2-H03 子项2: 顶层 QTabWidget ===
+    m_tabWidget = new QTabWidget(this);
+    m_tabWidget->setObjectName(QStringLiteral("gitPanelTabs"));
+    m_tabWidget->setDocumentMode(true);
+    mainLayout->addWidget(m_tabWidget);
+
+    // ===== 「更改」tab：原有 GitPanel 内容 =====
+    auto* changesTab = new QWidget(m_tabWidget);
+    auto* changesLayout = new QVBoxLayout(changesTab);
+    changesLayout->setContentsMargins(6, 4, 4, 4);
+    changesLayout->setSpacing(4);
 
     // === 顶部：当前分支 + 同步按钮 ===
     auto* topLayout = new QHBoxLayout();
     topLayout->setSpacing(4);
 
-    m_branchLabel = new QLabel(tr("分支:"), this);
-    m_branchCombo = new QComboBox(this);
+    m_branchLabel = new QLabel(tr("分支:"), changesTab);
+    m_branchCombo = new QComboBox(changesTab);
     m_branchCombo->setObjectName(QStringLiteral("gitBranchCombo"));
     m_branchCombo->setMinimumWidth(120);
     m_branchCombo->setToolTip(tr("切换分支"));
 
-    m_btnPull = new QPushButton(QString::fromUtf8("\xE2\x86\x93"), this);  // ↓
+    m_btnPull = new QPushButton(QString::fromUtf8("\xE2\x86\x93"), changesTab);  // ↓
     m_btnPull->setFixedSize(28, 24);
     m_btnPull->setToolTip(tr("拉取 (Pull)"));
     m_btnPull->setProperty("iconButton", true);
 
-    m_btnPush = new QPushButton(QString::fromUtf8("\xE2\x86\x91"), this);  // ↑
+    m_btnPush = new QPushButton(QString::fromUtf8("\xE2\x86\x91"), changesTab);  // ↑
     m_btnPush->setFixedSize(28, 24);
     m_btnPush->setToolTip(tr("推送 (Push)"));
     m_btnPush->setProperty("iconButton", true);
 
-    m_btnRefresh = new QPushButton(QString::fromUtf8("\u21BB"), this);  // ↻
+    m_btnRefresh = new QPushButton(QString::fromUtf8("\u21BB"), changesTab);  // ↻
     m_btnRefresh->setFixedSize(28, 24);
     m_btnRefresh->setToolTip(tr("刷新"));
     m_btnRefresh->setProperty("iconButton", true);
@@ -57,10 +83,10 @@ void GitPanel::setupUi()
     topLayout->addWidget(m_btnPush);
     topLayout->addWidget(m_btnRefresh);
 
-    mainLayout->addLayout(topLayout);
+    changesLayout->addLayout(topLayout);
 
     // === 文件状态树 ===
-    m_fileTree = new QTreeWidget(this);
+    m_fileTree = new QTreeWidget(changesTab);
     m_fileTree->setObjectName(QStringLiteral("gitFileTree"));
     m_fileTree->setHeaderHidden(true);
     m_fileTree->setAnimated(true);
@@ -71,19 +97,19 @@ void GitPanel::setupUi()
     m_fileTree->header()->setSectionResizeMode(0, QHeaderView::Fixed);
     m_fileTree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_fileTree->setColumnWidth(0, 100);
-    mainLayout->addWidget(m_fileTree, 1);
+    changesLayout->addWidget(m_fileTree, 1);
 
     // === 操作按钮行 ===
     auto* btnLayout1 = new QHBoxLayout();
     btnLayout1->setSpacing(4);
 
-    m_btnCommit = new QPushButton(tr("√ 提交"), this);
+    m_btnCommit = new QPushButton(tr("√ 提交"), changesTab);
     m_btnCommit->setObjectName(QStringLiteral("gitActionBtn"));
 
-    m_btnDiscard = new QPushButton(tr("⟲ 放弃更改"), this);
+    m_btnDiscard = new QPushButton(tr("⟲ 放弃更改"), changesTab);
     m_btnDiscard->setObjectName(QStringLiteral("gitActionBtn"));
 
-    m_btnStage = new QPushButton(tr("≡ 暂存更改"), this);
+    m_btnStage = new QPushButton(tr("≡ 暂存更改"), changesTab);
     m_btnStage->setObjectName(QStringLiteral("gitActionBtn"));
 
     btnLayout1->addWidget(m_btnCommit);
@@ -91,26 +117,32 @@ void GitPanel::setupUi()
     btnLayout1->addWidget(m_btnStage);
     btnLayout1->addStretch();
 
-    mainLayout->addLayout(btnLayout1);
+    changesLayout->addLayout(btnLayout1);
 
     // === 提交消息输入框 ===
     auto* commitLayout = new QHBoxLayout();
     commitLayout->setSpacing(4);
 
-    auto* commitLabel = new QLabel(tr("提交消息:"), this);
-    m_commitMsgEdit = new QLineEdit(this);
+    auto* commitLabel = new QLabel(tr("提交消息:"), changesTab);
+    m_commitMsgEdit = new QLineEdit(changesTab);
     m_commitMsgEdit->setPlaceholderText(tr("输入提交描述..."));
     m_commitMsgEdit->setObjectName(QStringLiteral("gitCommitEdit"));
 
     commitLayout->addWidget(commitLabel);
     commitLayout->addWidget(m_commitMsgEdit, 1);
-    mainLayout->addLayout(commitLayout);
+    changesLayout->addLayout(commitLayout);
 
     // === 状态标签 ===
-    m_statusLabel = new QLabel(this);
+    m_statusLabel = new QLabel(changesTab);
     m_statusLabel->setObjectName(QStringLiteral("gitStatusLabel"));
     m_statusLabel->setWordWrap(true);
-    mainLayout->addWidget(m_statusLabel);
+    changesLayout->addWidget(m_statusLabel);
+
+    m_tabWidget->addTab(changesTab, tr("更改"));
+
+    // ===== 「历史」tab：GitHistoryPanel =====
+    m_historyPanel = new GitHistoryPanel(m_tabWidget);
+    m_tabWidget->addTab(m_historyPanel, tr("历史"));
 
     // === 信号连接 ===
     connect(m_btnRefresh, &QPushButton::clicked, this, &GitPanel::onRefreshClicked);
@@ -334,6 +366,8 @@ void GitPanel::onStageClicked()
 void GitPanel::onRepoChanged()
 {
     refresh();
+    // P2-H03 子项2: 同步刷新历史面板（提交/推送/拉取后历史会变化）
+    if (m_historyPanel) m_historyPanel->refresh();
 }
 
 void GitPanel::onOperationFinished(const QString& op, bool success, const QString& output)

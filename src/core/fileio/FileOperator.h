@@ -41,6 +41,12 @@ public:
     void setContentReader(ContentReader reader) override;
     void setContentWriter(ContentWriter writer) override;
 
+    // === P3-M03 子项1: EOL（行尾）配置 ===
+    /// 设置保存时使用的行尾类型（"LF" / "CRLF" / "CR"），空字符串表示不转换
+    void setEolMode(const QString& eol) { m_eolMode = eol; }
+    /// 获取当前行尾类型
+    QString eolMode() const { return m_eolMode; }
+
 private:
     QFile m_file;
     QString m_currentFilePath;
@@ -48,8 +54,12 @@ private:
     bool m_modified = false;
     ContentReader m_contentReader;
     ContentWriter m_contentWriter;
+    QString m_eolMode;  // P3-M03 子项1: 行尾类型（"LF"/"CRLF"/"CR"，空表示不强制转换）
 
     QStringConverter::Encoding resolveEncoding(const QString& encodingName);
+
+    /// P3-M03 子项1: 按 m_eolMode 转换文本行尾
+    QString convertEol(const QString& content) const;
 };
 
 #endif // FILEOPERATOR_H

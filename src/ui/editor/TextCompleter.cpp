@@ -1,4 +1,6 @@
 #include "ui/editor/TextCompleter.h"
+#include "ui/editor/CompletionIcons.h"
+#include "ui/editor/CompletionPreviewWidget.h"
 #include "core/config/ThemeManager.h"
 #include "core/config/ConfigManager.h"
 #include "Logger.hpp"
@@ -16,6 +18,8 @@
 #include <QCoreApplication>
 #include <QGraphicsDropShadowEffect>
 #include <QCryptographicHash>
+#include <QMoveEvent>
+#include <QListWidgetItem>
 #include <algorithm>
 
 bool TextCompleter::isChineseChar(QChar ch)
@@ -79,8 +83,20 @@ TextCompleter::TextCompleter(QWidget *parent) : QListWidget(parent)
 	// 计时器
 	m_showTimer.setSingleShot(true);
 	connect(&m_showTimer, &QTimer::timeout, this, &TextCompleter::delayedShow);
+	// P2: 200ms 节流防抖定时器 — 快速连续输入时仅保留最后一次查询
+	m_debounceTimer.setSingleShot(true);
+	m_debounceTimer.setInterval(200);
+	connect(&m_debounceTimer, &QTimer::timeout, this, &TextCompleter::performCompletionUpdate);
 	connect(this, &QListWidget::clicked, this, &TextCompleter::onItemSelected);
 	connect(this, &TextCompleter::cursorPositionChanged, this, &TextCompleter::handleCursorMovement);
+
+	// C04-11: 预览面板（位于补全弹窗右侧）
+	m_previewWidget = new CompletionPreviewWidget(this);
+	connect(this, &QListWidget::currentItemChanged,
+	        this, &TextCompleter::onCurrentItemChanged);
+	// C04-10: 主题切换时清空图标缓存，下次访问按新主题重建
+	connect(&ThemeManager::instance(), &ThemeManager::themeChanged,
+	        this, []() { CompletionIcons::instance().refresh(); });
 }
 
 // setter
@@ -288,6 +304,33 @@ void TextCompleter::setMinPrefixLen(int length)
 	if (length > 2)	m_minPrefixLen = length;
 }
 
+// P0 C04-1: LSP kind 字符串 → 短类型标签（用于补全项视觉区分 LSP 项 vs 本地词典项）
+QString TextCompleter::lspKindToTag(const QString& kind) const
+{
+	if (kind == QStringLiteral("Function") || kind == QStringLiteral("Method"))
+		return QStringLiteral("[fn]");
+	if (kind == QStringLiteral("Constructor"))
+		return QStringLiteral("[ctor]");
+	if (kind == QStringLiteral("Variable") || kind == QStringLiteral("Field") ||
+		kind == QStringLiteral("Property"))
+		return QStringLiteral("[var]");
+	if (kind == QStringLiteral("Class") || kind == QStringLiteral("Struct") ||
+		kind == QStringLiteral("Interface"))
+		return QStringLiteral("[type]");
+	if (kind == QStringLiteral("Enum") || kind == QStringLiteral("EnumMember"))
+		return QStringLiteral("[enum]");
+	if (kind == QStringLiteral("Constant"))
+		return QStringLiteral("[const]");
+	if (kind == QStringLiteral("Keyword"))
+		return QStringLiteral("[kw]");
+	if (kind == QStringLiteral("Snippet"))
+		return QStringLiteral("[snip]");
+	if (kind == QStringLiteral("Module"))
+		return QStringLiteral("[mod]");
+	// 其他类型或空 kind 统一标记为 [lsp]
+	return QStringLiteral("[lsp]");
+}
+
 int TextCompleter::getMinPrefixLen() const
 {
 	return m_minPrefixLen;
@@ -327,6 +370,10 @@ void TextCompleter::delayedShow()
 #ifdef QT_DEBUG
         LOG_DEBUG("补全框已显示并激活");
 #endif
+        // C04-11: 显示预览面板并同步位置/内容
+        syncPreviewPosition();
+        updatePreviewForCurrentItem();
+        syncPreviewVisibility();
     } else {
 #ifdef QT_DEBUG
         LOG_DEBUG("不显示补全框 - 项目数:" << count()
@@ -578,185 +625,251 @@ void TextCompleter::filterMatches(const QString &context)
 }
 
 /// @brief 动态更新补全列表 核心触发逻辑
+/// P2: 200ms 节流防抖入口 — 快速连续输入时丢弃中间查询，仅保留最后一次
 void TextCompleter::updateCompletionList()
 {
 	// 前导处理  没有绑定编辑器就直接返回
+	if (!m_textEdit) {
+		return;
+	}
+
+	// 获取当前上下文（支持中文）— 前缀检查需立即执行，不延迟
+	auto context = getCurrentContext();
+	QString curWord = context.first;
+
+	// 条件检查
+	// H3: 成员补全模式下跳过最小前缀检查 — 输入 . / -> / :: 后允许空前缀显示 LSP 候选
+	if (!m_memberCompletionMode && curWord.length() < m_minPrefixLen) {
+		hideCompletion();
+		return;
+	}
+
+	// H3: 成员补全模式下，如果前缀为空且无 LSP 候选，不显示（等待 LSP 响应）
+	if (m_memberCompletionMode && curWord.isEmpty() && m_lspItems.isEmpty()) {
+		return;  // 不隐藏，等待 LSP 响应后由 setLspCompletionItems 触发显示
+	}
+
+	// P2: 200ms 节流防抖 — 启动（或重启）定时器，快速连续输入只执行最后一次
+	// 定时器到期后调用 performCompletionUpdate() 执行实际的筛选 + 渲染
+	m_debounceTimer.start();
+}
+
+/// @brief P2: 节流防抖到期后执行实际的补全列表更新（从 updateCompletionList 延迟调用）
+void TextCompleter::performCompletionUpdate()
+{
+	if (!m_textEdit) {
+		return;
+	}
+
 #ifdef QT_DEBUG
-	LOG_DEBUG("====== 更新补全列表 ======");
+	LOG_DEBUG("====== 执行补全列表更新（节流后） ======");
 #endif
-    if (!m_textEdit) {
+
+	// 获取当前上下文（支持中文）
+	auto context = getCurrentContext();
+	QString curWord = context.first;
+	int startPos = context.second;
+
+	// 获取最新文档内容（支持中文）
+	QString fullText = m_textEdit->toPlainText();
+
+	// P2: O(1) 文档长度快速判断 — 长度未变时跳过 O(n) MD5 计算
+	// 用户仅移动光标（未输入文字）时长度不变，直接复用缓存
+	bool docChanged;
+	if (fullText.length() != m_lastDocLength) {
+		// 长度变化 → 需要 MD5 确认内容是否真正变化
+		QString docHash = QCryptographicHash::hash(fullText.toUtf8(), QCryptographicHash::Md5).toHex().left(8);
+		docChanged = (docHash != m_cachedDocHash);
+		m_lastDocLength = fullText.length();
+		if (docChanged) {
+			m_cachedDocHash = docHash;
+			// P0 C04-2: 文档内容变化时清理 LSP 补全缓存（避免过期结果）
+			m_lspCompletionCache.clear();
+		}
+	} else {
+		// 长度未变 → 启发式判定为未变化，跳过 MD5（O(1) 快速路径）
+		docChanged = false;
+	}
+
+	if (!docChanged && !m_cachedWordList.isEmpty()) {
+		// 文档未变，直接用缓存的词列表做筛选，跳过 extractRecentFragments + extractDocumentWords
+		m_wordList = m_cachedWordList;
+	} else {
+		// 文档已变化或首次加载，执行全量扫描
+		// 清空并重新构建候选列表
+		m_wordList.clear();
+		m_recentFragments.clear();
+
+		// 提取历史片段（支持中文）
+		extractRecentFragments(fullText);
+
+		// 提取文档单词（支持中文）
+		extractDocumentWords(fullText);
+
+		// 合并候选词并去重
+		QSet<QString> uniqueSet;
+		QStringList combinedList;
+
+		// 添加历史片段（按距离排序）
+		QList<int> positions = m_recentFragments.keys();
+		std::sort(positions.begin(), positions.end(), [startPos](int a, int b) {
+			return std::abs(a - startPos) < std::abs(b - startPos);
+		});
+
+		for (int pos : positions) {
+			const QString& fragment = m_recentFragments[pos];
+			if (!uniqueSet.contains(fragment)) {
+				uniqueSet.insert(fragment);
+				combinedList.append(fragment);
+			}
+		}
+
+		// 添加文档单词
+		for (const QString& word : m_wordList) {
+			if (!uniqueSet.contains(word)) {
+				uniqueSet.insert(word);
+				combinedList.append(word);
+			}
+		}
+
+		// 按长度和字典序排序（支持中文）
+		std::sort(combinedList.begin(), combinedList.end(), [](const QString& a, const QString& b) {
+			if (a.length() != b.length()) {
+				return a.length() < b.length();
+			}
+			return QString::compare(a, b, Qt::CaseInsensitive) < 0;
+		});
+
+		// 限制最大候选词数量
+		if (combinedList.size() > 200) combinedList = combinedList.mid(0, 200);
+
+		m_wordList = combinedList;
+		// 缓存结果供后续使用
+		m_cachedWordList = m_wordList;
+	}
+
+	// 筛选匹配的候选词（支持中文子串匹配）
+	filterMatches(curWord);
+
+	// 更新UI显示
+	clear();
+
+	// [LSP 补全] 优先显示 LSP 候选项（带类型详情，排在本地词典前面）
+	int lspShown = 0;
+	// P0 C04-2: 当前无新鲜 LSP 响应时，回退到按前缀缓存的 LSP 结果
+	// 避免快速连续输入时弹窗空白闪烁（缓存命中立即显示，新响应到达后刷新）
+	QList<LspCompletionItem> lspSource = m_lspItems;
+	if (lspSource.isEmpty() && !curWord.isEmpty()) {
+		auto it = m_lspCompletionCache.constFind(curWord);
+		if (it != m_lspCompletionCache.constEnd()) {
+			lspSource = it.value();
+		}
+	}
+	if (!lspSource.isEmpty()) {
+		// 按 sortText 排序（LSP 服务器提供的排序优先级）
+		QList<LspCompletionItem> sortedLsp = lspSource;
+		std::sort(sortedLsp.begin(), sortedLsp.end(), [](const LspCompletionItem& a, const LspCompletionItem& b) {
+			// sortText 优先，其次按 label
+			if (!a.sortText.isEmpty() && !b.sortText.isEmpty() && a.sortText != b.sortText)
+				return a.sortText < b.sortText;
+			return a.label < b.label;
+		});
+
+		for (const LspCompletionItem& item : sortedLsp) {
+			// 前缀匹配筛选（LSP 项按 label 匹配当前输入前缀）
+			if (!curWord.isEmpty() && !item.label.startsWith(curWord, Qt::CaseInsensitive))
+				continue;
+
+			// P0 C04-1: 显示文本添加类型标签前缀，视觉区分 LSP 项 vs 本地词典项
+			// 格式: "[fn] printf  (int, const char*)"
+			QString tag = lspKindToTag(item.kind);
+			QString displayText = tag + QStringLiteral(" ") + item.label;
+			if (!item.detail.isEmpty())
+				displayText += QStringLiteral("  ") + item.detail;
+
+			// tooltip 显示完整文档
+			QString tooltip = item.kind;
+			if (!item.documentation.isEmpty())
+				tooltip += QStringLiteral("\n") + item.documentation;
+
+			QListWidgetItem* listItem = new QListWidgetItem(displayText, this);
+			listItem->setToolTip(tooltip);
+			// C04-10: 设置 LSP kind 图标（snippet 类型自动用闪电图标）
+			listItem->setIcon(CompletionIcons::instance().iconForLspKind(item.kind));
+			listItem->setData(RoleIsLsp, true);
+			listItem->setData(RoleLspItem, item.label);  // 用 label 作为查找键
+			// 存储 insertText（可能与 label 不同，如代码片段补全）
+			listItem->setData(Qt::UserRole, item.insertText.isEmpty() ? item.label : item.insertText);
+
+			addItem(listItem);
+			++lspShown;
+			// P2: LSP 项上限从 50 降至 20，降低一次性渲染开销
+			if (lspShown >= 20) break;
+		}
+	}
+
+	// 本地词典候选项（追加在 LSP 项之后）
+	if (!m_filteredList.isEmpty()) {
 #ifdef QT_DEBUG
-		LOG_DEBUG("错误：未绑定文本编辑器");
+		LOG_DEBUG("找到" << m_filteredList.size() << "个本地候选词, " << lspShown << "个LSP候选");
 #endif
-        return;
-    }
-
-    // 获取当前上下文（支持中文）
-    auto context = getCurrentContext();
-    QString curWord = context.first;
-    int startPos = context.second;
+		for (const QString& word : m_filteredList) {
+			// 避免与已显示的 LSP 项重复
+			bool dup = false;
+			for (int i = 0; i < count(); ++i) {
+				if (item(i)->data(RoleIsLsp).toBool() &&
+					item(i)->data(RoleLspItem).toString() == word) {
+					dup = true;
+					break;
+				}
+			}
+			if (!dup) {
+			// C04-10: 本地词典项设置单词图标
+			QListWidgetItem* localItem = new QListWidgetItem(word);
+			localItem->setIcon(CompletionIcons::instance().iconForLocalWord());
+			addItem(localItem);
+		}
+		}
+		ensureMultiLineDisplay(); // 确保多行显示
+		delayedShow();
+	} else if (lspShown > 0) {
+		// 只有 LSP 项，没有本地词典项
+		ensureMultiLineDisplay();
+		delayedShow();
+	} else {
 #ifdef QT_DEBUG
-    LOG_DEBUG("当前上下文 - 前缀:" << curWord << "长度:" << curWord.length()
-             << "起始位置:" << startPos);
+		LOG_DEBUG("没有匹配的候选词，隐藏补全框");
 #endif
-
-    // 条件检查
-    if (curWord.length() < m_minPrefixLen) {
-#ifdef QT_DEBUG
-		LOG_DEBUG("前缀长度不足 (" << curWord.length() << "<" << m_minPrefixLen << ")，隐藏补全框");
-#endif
-        hideCompletion();
-        return;
-    }
-
-    // 获取最新文档内容（支持中文）
-    QString fullText = m_textEdit->toPlainText();
-
-    // [性能优化] 快速路径：通过文档哈希检测是否真正变化，避免每次击键全量扫描
-    QString docHash = QCryptographicHash::hash(fullText.toUtf8(), QCryptographicHash::Md5).toHex().left(8);
-    bool docChanged = (docHash != m_cachedDocHash);
-
-    if (!docChanged && !m_cachedWordList.isEmpty()) {
-        // 文档未变，直接用缓存的词列表做筛选，跳过 extractRecentFragments + extractDocumentWords
-        m_wordList = m_cachedWordList;
-    } else {
-        // 文档已变化或首次加载，执行全量扫描
-        m_cachedDocHash = docHash;
-
-        // 清空并重新构建候选列表
-        m_wordList.clear();
-        m_recentFragments.clear();
-
-        // 提取历史片段（支持中文）
-        extractRecentFragments(fullText);
-
-        // 提取文档单词（支持中文）
-        extractDocumentWords(fullText);
-
-        // 合并候选词并去重
-        QSet<QString> uniqueSet;
-        QStringList combinedList;
-
-        // 添加历史片段（按距离排序）
-        QList<int> positions = m_recentFragments.keys();
-        std::sort(positions.begin(), positions.end(), [startPos](int a, int b) {
-            return std::abs(a - startPos) < std::abs(b - startPos);
-        });
-
-        for (int pos : positions) {
-            const QString& fragment = m_recentFragments[pos];
-            if (!uniqueSet.contains(fragment)) {
-                uniqueSet.insert(fragment);
-                combinedList.append(fragment);
-            }
-        }
-
-        // 添加文档单词
-        for (const QString& word : m_wordList) {
-            if (!uniqueSet.contains(word)) {
-                uniqueSet.insert(word);
-                combinedList.append(word);
-            }
-        }
-
-        // 按长度和字典序排序（支持中文）
-        std::sort(combinedList.begin(), combinedList.end(), [](const QString& a, const QString& b) {
-            if (a.length() != b.length()) {
-                return a.length() < b.length();
-            }
-            return QString::compare(a, b, Qt::CaseInsensitive) < 0;
-        });
-
-        // 限制最大候选词数量
-        if (combinedList.size() > 200) combinedList = combinedList.mid(0, 200);
-
-        m_wordList = combinedList;
-        // 缓存结果供后续使用
-        m_cachedWordList = m_wordList;
-    }
-    
-    // 筛选匹配的候选词（支持中文子串匹配）
-    filterMatches(curWord);
-
-    // 更新UI显示
-    clear();
-
-    // [LSP 补全] 优先显示 LSP 候选项（带类型详情，排在本地词典前面）
-    int lspShown = 0;
-    if (!m_lspItems.isEmpty()) {
-        // 按 sortText 排序（LSP 服务器提供的排序优先级）
-        QList<LspCompletionItem> sortedLsp = m_lspItems;
-        std::sort(sortedLsp.begin(), sortedLsp.end(), [](const LspCompletionItem& a, const LspCompletionItem& b) {
-            // sortText 优先，其次按 label
-            if (!a.sortText.isEmpty() && !b.sortText.isEmpty() && a.sortText != b.sortText)
-                return a.sortText < b.sortText;
-            return a.label < b.label;
-        });
-
-        for (const LspCompletionItem& item : sortedLsp) {
-            // 前缀匹配筛选（LSP 项按 label 匹配当前输入前缀）
-            if (!curWord.isEmpty() && !item.label.startsWith(curWord, Qt::CaseInsensitive))
-                continue;
-
-            // 显示文本：label + detail（如 "printf  (int, const char*)"）
-            QString displayText = item.label;
-            if (!item.detail.isEmpty())
-                displayText += QStringLiteral("  ") + item.detail;
-
-            // tooltip 显示完整文档
-            QString tooltip = item.kind;
-            if (!item.documentation.isEmpty())
-                tooltip += QStringLiteral("\n") + item.documentation;
-
-            QListWidgetItem* listItem = new QListWidgetItem(displayText, this);
-            listItem->setToolTip(tooltip);
-            listItem->setData(RoleIsLsp, true);
-            listItem->setData(RoleLspItem, item.label);  // 用 label 作为查找键
-            // 存储 insertText（可能与 label 不同，如代码片段补全）
-            listItem->setData(Qt::UserRole, item.insertText.isEmpty() ? item.label : item.insertText);
-
-            addItem(listItem);
-            ++lspShown;
-            if (lspShown >= 50) break;  // LSP 项上限
-        }
-    }
-
-    // 本地词典候选项（追加在 LSP 项之后）
-    if (!m_filteredList.isEmpty()) {
-#ifdef QT_DEBUG
-        LOG_DEBUG("找到" << m_filteredList.size() << "个本地候选词, " << lspShown << "个LSP候选");
-#endif
-        for (const QString& word : m_filteredList) {
-            // 避免与已显示的 LSP 项重复
-            bool dup = false;
-            for (int i = 0; i < count(); ++i) {
-                if (item(i)->data(RoleIsLsp).toBool() &&
-                    item(i)->data(RoleLspItem).toString() == word) {
-                    dup = true;
-                    break;
-                }
-            }
-            if (!dup) {
-                addItem(new QListWidgetItem(word));
-            }
-        }
-        ensureMultiLineDisplay(); // 确保多行显示
-        delayedShow();
-    } else if (lspShown > 0) {
-        // 只有 LSP 项，没有本地词典项
-        ensureMultiLineDisplay();
-        delayedShow();
-    } else {
-#ifdef QT_DEBUG
-        LOG_DEBUG("没有匹配的候选词，隐藏补全框");
-#endif
-        hideCompletion();
-    }
+		hideCompletion();
+	}
 }
 
 void TextCompleter::hideCompletion()
 {
+	// P2: 隐藏时停止节流定时器，避免隐藏后仍触发延迟更新
+	m_debounceTimer.stop();
+	// H3: 隐藏弹窗时退出成员补全模式
+	m_memberCompletionMode = false;
+	m_pendingMemberCompletion = false;
+	// C04-11: 同步隐藏预览面板
+	if (m_previewWidget)	m_previewWidget->hide();
 	if (isVisible())	hide();
+}
+
+// ========== H3: 成员补全自动触发（. / -> / ::）==========
+
+void TextCompleter::triggerMemberCompletion()
+{
+	// H3: 设置 pending 标志，等待 LSP 响应后显示弹窗
+	// 同时进入成员补全模式（跳过最小前缀检查）
+	m_pendingMemberCompletion = true;
+	m_memberCompletionMode = true;
+}
+
+void TextCompleter::clearMemberCompletion()
+{
+	m_memberCompletionMode = false;
+	m_pendingMemberCompletion = false;
 }
 
 ////////////////////  槽函数具体实现  /////////////////////////////
@@ -885,6 +998,16 @@ bool TextCompleter::event(QEvent *event)
     return QListWidget::event(event);
 }
 
+void TextCompleter::hideEvent(QHideEvent* event)
+{
+	// H3: 弹窗隐藏时清除成员补全模式标志（覆盖所有隐藏路径，包括 Qt::Popup 自动隐藏）
+	m_memberCompletionMode = false;
+	m_pendingMemberCompletion = false;
+	// C04-11: 同步隐藏预览面板（覆盖所有隐藏路径）
+	if (m_previewWidget)	m_previewWidget->hide();
+	QListWidget::hideEvent(event);
+}
+
 TextCompleter::~TextCompleter()
 {
 }
@@ -986,14 +1109,163 @@ void TextCompleter::applyFontSize()
 void TextCompleter::setLspCompletionItems(const QList<LspCompletionItem>& items)
 {
     m_lspItems = items;
+
+    // P0 C04-2: 按当前前缀缓存 LSP 结果
+    // 后续输入相同前缀时（如删除重输、LSP 响应延迟），可立即显示缓存避免空白
+    auto context = getCurrentContext();
+    const QString& prefix = context.first;
+    if (!prefix.isEmpty()) {
+        m_lspCompletionCache.insert(prefix, items);
+        // 限制缓存大小：超过上限时清空重建（简化 LRU，保留当前条目）
+        if (m_lspCompletionCache.size() > kMaxLspCacheEntries) {
+            QList<LspCompletionItem> current = items;
+            m_lspCompletionCache.clear();
+            m_lspCompletionCache.insert(prefix, current);
+        }
+    }
+
+    // H3: 成员补全 — 收到 LSP 响应后，如果处于 pending 状态则显示弹窗
+    if (m_pendingMemberCompletion && !items.isEmpty() && m_textEdit) {
+        m_pendingMemberCompletion = false;
+        m_memberCompletionMode = true;
+        // P2: LSP 响应直接执行实际更新，绕过 200ms 节流延迟（避免成员补全弹窗延迟显示）
+        m_debounceTimer.stop();
+        performCompletionUpdate();
+        adjustPosition();
+        // C04-11: 同步预览面板
+        if (count() > 0 && !currentItem())	setCurrentRow(0);
+        syncPreviewPosition();
+        updatePreviewForCurrentItem();
+        syncPreviewVisibility();
+        return;
+    }
+
     // 收到新 LSP 候选后立即刷新补全列表（如果当前可见）
     if (isVisible() && m_textEdit) {
-        updateCompletionList();
+        // P2: LSP 响应直接执行实际更新，绕过节流延迟
+        m_debounceTimer.stop();
+        performCompletionUpdate();
         adjustPosition();
+        // C04-11: 刷新后若当前项丢失则恢复选中首项，并同步预览
+        if (count() > 0 && !currentItem())	setCurrentRow(0);
+        syncPreviewPosition();
+        updatePreviewForCurrentItem();
     }
 }
 
 void TextCompleter::clearLspCompletionItems()
 {
     m_lspItems.clear();
+}
+
+// ========== C04-11: 预览面板相关实现 ==========
+
+void TextCompleter::moveEvent(QMoveEvent* event)
+{
+	QListWidget::moveEvent(event);
+	// 弹窗位置变化时同步移动预览面板
+	syncPreviewPosition();
+}
+
+void TextCompleter::syncPreviewPosition()
+{
+	if (!m_previewWidget)	return;
+	// 定位在补全弹窗右侧（紧贴，留 2px 间距）
+	QPoint popupPos = pos();
+	int previewX = popupPos.x() + width() + 2;
+	int previewY = popupPos.y();
+
+	// 屏幕边界保护：右侧空间不足时放到左侧
+	QScreen* screen = QGuiApplication::screenAt(popupPos);
+	if (!screen)	screen = QGuiApplication::primaryScreen();
+	if (screen) {
+		QRect screenGeo = screen->availableGeometry();
+		if (previewX + m_previewWidget->width() > screenGeo.right()) {
+			previewX = popupPos.x() - m_previewWidget->width() - 2;
+			if (previewX < screenGeo.left()) {
+				// 左侧也无空间，贴左边显示
+				previewX = screenGeo.left();
+			}
+		}
+		if (previewY + m_previewWidget->height() > screenGeo.bottom()) {
+			previewY = screenGeo.bottom() - m_previewWidget->height();
+		}
+		if (previewY < screenGeo.top()) {
+			previewY = screenGeo.top();
+		}
+	}
+	m_previewWidget->move(previewX, previewY);
+}
+
+void TextCompleter::updatePreviewForCurrentItem()
+{
+	if (!m_previewWidget)	return;
+	QListWidgetItem* cur = currentItem();
+	if (!cur) {
+		m_previewWidget->clearContent();
+		return;
+	}
+
+	// 判断是否为 LSP 项
+	bool isLsp = cur->data(RoleIsLsp).toBool();
+	if (isLsp) {
+		QString label = cur->data(RoleLspItem).toString();
+		// 从 m_lspItems 中按 label 查找完整 LspCompletionItem
+		for (const LspCompletionItem& it : m_lspItems) {
+			if (it.label == label) {
+				// snippet 类型用 snippet 预览（高亮 $1/$2 占位符）
+				if (it.kind == QStringLiteral("Snippet")) {
+					QString body = it.insertText.isEmpty() ? it.label : it.insertText;
+					m_previewWidget->setSnippet(it.label, body);
+				} else {
+					m_previewWidget->setLspItem(it);
+				}
+				return;
+			}
+		}
+		// 缓存中查找（按前缀缓存）
+		for (auto it = m_lspCompletionCache.constBegin(); it != m_lspCompletionCache.constEnd(); ++it) {
+			for (const LspCompletionItem& ci : it.value()) {
+				if (ci.label == label) {
+					if (ci.kind == QStringLiteral("Snippet")) {
+						QString body = ci.insertText.isEmpty() ? ci.label : ci.insertText;
+						m_previewWidget->setSnippet(ci.label, body);
+					} else {
+						m_previewWidget->setLspItem(ci);
+					}
+					return;
+				}
+			}
+		}
+		// 未找到完整项，仅显示 label
+		m_previewWidget->setLocalWord(label);
+	} else {
+		// 本地词典项
+		m_previewWidget->setLocalWord(cur->text());
+	}
+}
+
+void TextCompleter::syncPreviewVisibility()
+{
+	if (!m_previewWidget)	return;
+	if (isVisible() && count() > 0 && currentItem()) {
+		m_previewWidget->show();
+	} else {
+		m_previewWidget->hide();
+	}
+}
+
+void TextCompleter::onCurrentItemChanged(QListWidgetItem* current, QListWidgetItem* previous)
+{
+	Q_UNUSED(previous)
+	if (!m_previewWidget)	return;
+	if (!current) {
+		m_previewWidget->clearContent();
+		return;
+	}
+	updatePreviewForCurrentItem();
+	// 预览面板位置不变（仅内容变化），但确保可见
+	if (isVisible()) {
+		m_previewWidget->show();
+	}
 }

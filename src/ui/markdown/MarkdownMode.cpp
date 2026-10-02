@@ -15,6 +15,10 @@
 #include <QScrollBar>
 #include <QRegularExpression>
 #include <QFileDialog>
+#include <QApplication>
+#include <QClipboard>
+#include <QMimeData>
+#include <QTextDocument>
 #include "ui/dialog/ModernDialog.h"
 #include <QMouseEvent>
 
@@ -120,13 +124,21 @@ MarkdownMode::MarkdownMode(QWidget* parent)
     m_editor->setFontSize(ConfigManager::instance().fontSize());
 
     // 监听配置变更，字体大小变化时同步到 Markdown 编辑器
+    // P3-M02 子项2: Markdown 自定义 CSS 变更时刷新预览
     connect(&ConfigManager::instance(), &ConfigManager::configChanged,
             this, [this](const QString& key, const QVariant& value) {
         if (key == QStringLiteral("Display/fontSize")) {
             QSignalBlocker blocker(m_editor);
             m_editor->setFontSize(value.toInt());
+        } else if (key == QStringLiteral("Markdown/customCss")) {
+            // 用户自定义 CSS 变更 → 重新应用 CSS 并刷新预览
+            applyPreviewCss();
+            refreshPreview();
         }
     });
+
+    // P3-M02 子项2+3: 初始化预览区 CSS（主题预设 + 用户自定义 CSS）
+    applyPreviewCss();
 }
 
 void MarkdownMode::setupToolbar()
@@ -153,6 +165,15 @@ void MarkdownMode::setupToolbar()
         parseToc();
     });
     m_toolbar->addAction(refreshBtn);
+
+    m_toolbar->addSeparator();
+
+    // P3-M02 子项4: 复制为富文本按钮
+    auto* copyRichBtn = new QAction(tr("复制富文本"), this);
+    copyRichBtn->setToolTip(tr("将当前 Markdown 转换为富文本（HTML）并复制到剪贴板，可粘贴到 Word/邮件等"));
+    copyRichBtn->setStatusTip(tr("Copy as Rich Text"));
+    connect(copyRichBtn, &QAction::triggered, this, &MarkdownMode::copyAsRichText);
+    m_toolbar->addAction(copyRichBtn);
 
     // 添加弹性空间
     QWidget* spacer = new QWidget();
@@ -234,6 +255,8 @@ void MarkdownMode::refreshPreview()
         ratio = (denom > 0) ? static_cast<double>(vScroll->value()) / denom : 0.0;
     }
 
+    // P3-M02 子项3: CSS 由 MarkdownMode 通过 setDefaultStyleSheet 控制
+    // （MaddyParser 返回 body-only HTML，不再嵌入 <style>）
     m_preview->setHtml(html);
 
     // 延迟恢复滚动位置 (等待 QTextDocument 布局更新完成)
@@ -248,8 +271,19 @@ void MarkdownMode::refreshPreview()
     }
 }
 
+void MarkdownMode::setFilePath(const QString& filePath)
+{
+    m_filePath = filePath;
+    if (m_tocPanel) {
+        m_tocPanel->setFilePath(filePath);
+    }
+}
+
 void MarkdownMode::onThemeChanged()
 {
+    // P3-M02 子项3: 主题切换时重新应用 CSS 预设（暗色/浅色）
+    applyPreviewCss();
+
     // 1. 刷新预览内容（CSS由ThemeManager动态生成）
     refreshPreview();
 
@@ -491,4 +525,154 @@ void MarkdownMode::parseToc()
         entries.append(entry);
     }
     m_tocPanel->updateToc(entries);
+}
+
+// ============================================================
+// P3-M02 子项2+3: CSS 预设与用户自定义 CSS
+// ============================================================
+
+QString MarkdownMode::darkCssPreset()
+{
+    // 暗色主题 CSS 预设：深色背景 + 浅色文字 + 链接色 + 代码块样式
+    // QTextBrowser 兼容的朴素 CSS2.1（不使用 var()/gradient/box-shadow/:hover/transition）
+    return QStringLiteral(
+        "body { font-family: 'Microsoft YaHei','Segoe UI',sans-serif; font-size: 14px; "
+        "line-height: 1.7; color: #e6e6e6; background-color: #1e1e1e; margin: 0; padding: 8px 16px; }"
+        "h1,h2,h3,h4,h5,h6 { color: #ffffff; font-weight: 600; line-height: 1.3; "
+        "margin-top: 20px; margin-bottom: 8px; }"
+        "h1 { font-size: 24px; border-bottom: 2px solid #9B59B6; padding-bottom: 6px; }"
+        "h2 { font-size: 20px; border-bottom: 1px solid #444; padding-bottom: 4px; }"
+        "h3 { font-size: 17px; }"
+        "h4 { font-size: 15px; }"
+        "h5,h6 { font-size: 14px; color: #aaa; }"
+        "p { margin: 8px 0; }"
+        "a { color: #569CD6; text-decoration: none; }"
+        "strong { font-weight: 700; color: #ffffff; }"
+        "em { font-style: italic; color: #c586c0; }"
+        "del { color: #808080; text-decoration: line-through; }"
+        "code { background-color: #2d2d30; color: #ce9178; padding: 2px 5px; border-radius: 3px; "
+        "font-family: 'Consolas','Courier New',monospace; font-size: 13px; }"
+        "pre { background-color: #1e1e1e; color: #d4d4d4; padding: 12px; "
+        "border: 1px solid #3c3c3c; border-radius: 6px; margin: 10px 0; }"
+        "pre code { background-color: transparent; color: #d4d4d4; padding: 0; border: none; "
+        "display: block; white-space: pre; font-size: 13px; line-height: 1.5; }"
+        "blockquote { border-left: 4px solid #569CD6; padding: 6px 14px; margin: 10px 0; "
+        "color: #aaa; background-color: #252526; }"
+        "table { border-collapse: collapse; margin: 10px 0; }"
+        "th,td { border: 1px solid #3c3c3c; padding: 6px 12px; }"
+        "th { background-color: #2d2d30; color: #569CD6; font-weight: 600; }"
+        "hr { border: none; border-top: 1px solid #3c3c3c; margin: 18px 0; }"
+        "ul,ol { padding-left: 24px; margin: 6px 0; }"
+        "li { margin: 3px 0; }"
+        "img { max-width: 100%; }"
+        ".hl-kw { color: #569CD6; font-weight: 600; }"
+        ".hl-str { color: #CE9178; }"
+        ".hl-num { color: #B5CEA8; }"
+        ".hl-cmt { color: #6A9955; font-style: italic; }"
+        ".hl-pp { color: #C586C0; }"
+        ".hl-type { color: #4EC9B0; }"
+        ".hl-fn { color: #DCDCAA; }"
+    );
+}
+
+QString MarkdownMode::lightCssPreset()
+{
+    // 浅色主题 CSS 预设：浅色背景 + 深色文字 + 链接色 + 代码块样式
+    return QStringLiteral(
+        "body { font-family: 'Microsoft YaHei','Segoe UI',sans-serif; font-size: 14px; "
+        "line-height: 1.7; color: #2c3e50; background-color: #ffffff; margin: 0; padding: 8px 16px; }"
+        "h1,h2,h3,h4,h5,h6 { color: #2c3e50; font-weight: 600; line-height: 1.3; "
+        "margin-top: 20px; margin-bottom: 8px; }"
+        "h1 { font-size: 24px; border-bottom: 2px solid #9B59B6; padding-bottom: 6px; color: #8e44ad; }"
+        "h2 { font-size: 20px; border-bottom: 1px solid #e0d0e8; padding-bottom: 4px; color: #9B59B6; }"
+        "h3 { font-size: 17px; color: #7d3c98; }"
+        "h4 { font-size: 15px; color: #666; }"
+        "h5,h6 { font-size: 14px; color: #888; }"
+        "p { margin: 8px 0; }"
+        "a { color: #9B59B6; text-decoration: none; }"
+        "strong { font-weight: 700; color: #2c3e50; }"
+        "em { font-style: italic; color: #9B59B6; }"
+        "del { color: #999; text-decoration: line-through; }"
+        "code { background-color: #f0eef0; color: #c7254e; padding: 2px 5px; border-radius: 3px; "
+        "font-family: 'Consolas','Courier New',monospace; font-size: 13px; }"
+        "pre { background-color: #f6f8fa; color: #24292e; padding: 12px; "
+        "border: 1px solid #e1e4e8; border-radius: 6px; margin: 10px 0; }"
+        "pre code { background-color: transparent; color: #24292e; padding: 0; border: none; "
+        "display: block; white-space: pre; font-size: 13px; line-height: 1.5; }"
+        "blockquote { border-left: 4px solid #9B59B6; padding: 6px 14px; margin: 10px 0; "
+        "color: #666; background-color: #faf8fa; }"
+        "table { border-collapse: collapse; margin: 10px 0; }"
+        "th,td { border: 1px solid #e1e4e8; padding: 6px 12px; }"
+        "th { background-color: #f6f8fa; color: #9B59B6; font-weight: 600; }"
+        "hr { border: none; border-top: 1px solid #e1e4e8; margin: 18px 0; }"
+        "ul,ol { padding-left: 24px; margin: 6px 0; }"
+        "li { margin: 3px 0; }"
+        "img { max-width: 100%; }"
+        ".hl-kw { color: #0000FF; font-weight: 600; }"
+        ".hl-str { color: #A31515; }"
+        ".hl-num { color: #098658; }"
+        ".hl-cmt { color: #008000; font-style: italic; }"
+        ".hl-pp { color: #AF00DB; }"
+        ".hl-type { color: #267F99; }"
+        ".hl-fn { color: #795E26; }"
+    );
+}
+
+QString MarkdownMode::buildPreviewCss() const
+{
+    // P3-M02 子项3: 根据当前主题选择预设 CSS
+    // 亮/暗主题判定 (与 ThemeManager/MaddyParser 一致: bgEditor.lightness() > 128)
+    const auto& p = ThemeManager::instance().currentPalette();
+    bool isLight = p.bgEditor.lightness() > 128;
+    QString preset = isLight ? lightCssPreset() : darkCssPreset();
+
+    // P3-M02 子项2: 用户自定义 CSS 叠加在主题预设之上（用户 CSS 优先级更高）
+    QString userCss = ConfigManager::instance().markdownCustomCss();
+    if (!userCss.isEmpty()) {
+        return preset + QStringLiteral("\n/* === 用户自定义 CSS === */\n") + userCss;
+    }
+    return preset;
+}
+
+void MarkdownMode::applyPreviewCss()
+{
+    if (!m_preview || !m_preview->document()) return;
+    // P3-M02 子项2+3: 通过 setDefaultStyleSheet 应用 CSS（主题预设 + 用户自定义）
+    m_preview->document()->setDefaultStyleSheet(buildPreviewCss());
+}
+
+// ============================================================
+// P3-M02 子项4: 复制为富文本
+// ============================================================
+
+void MarkdownMode::copyAsRichText()
+{
+    QString markdown = m_editor->toPlainText();
+    if (markdown.isEmpty()) {
+        ModernDialog::information(
+            this,
+            tr("提示"),
+            tr("编辑器内容为空，无可复制内容。")
+        );
+        return;
+    }
+
+    // 调用 MdExporter 转换为 HTML 字符串（带完整样式，便于粘贴到 Word/邮件等）
+    MdExporter exporter(this);
+    exporter.setParser(m_parser);
+    QString richText = exporter.copyAsRichText(markdown);
+
+    // 写入剪贴板（富文本 HTML 格式）
+    QApplication::clipboard()->setText(richText);
+    // 同时设置富文本 MIME（支持 Word/邮件客户端识别 HTML）
+    QMimeData* mimeData = new QMimeData;
+    mimeData->setHtml(richText);
+    mimeData->setText(richText);
+    QApplication::clipboard()->setMimeData(mimeData);
+
+    ModernDialog::information(
+        this,
+        tr("已复制"),
+        tr("已复制为富文本，可粘贴到 Word/邮件等支持 HTML 的应用。")
+    );
 }

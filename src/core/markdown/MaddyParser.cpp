@@ -1,9 +1,11 @@
 #include "core/markdown/MaddyParser.h"
 #include "core/editor/CodeHighlighter.h"
+#include "core/markdown/MermaidRenderer.h"
 #include "core/config/ThemeManager.h"
 
 #include <maddy/parser.h>
 #include <sstream>
+#include <QRegularExpression>
 
 QString MaddyParser::toHtml(const QString& markdown)
 {
@@ -19,17 +21,20 @@ QString MaddyParser::toHtml(const QString& markdown)
     // 代码块语法高亮 (对 <code class="language-xxx"> 着色为 <span class="hl-*">)
     html = CodeHighlighter::highlightHtml(html);
 
-    // 注入主题感知 CSS (QTextBrowser 兼容的朴素 CSS2.1，颜色随当前主题)
-    QString styled = QStringLiteral(
-        "<html><head><meta charset=\"utf-8\"><style>%1</style></head>"
-        "<body>%2</body></html>")
-        .arg(defaultStyleSheet(), html);
+    // P3-M02 子项5: mermaid 代码块渲染（将 <pre><code class="language-mermaid">...</code></pre>
+    // 替换为内联 SVG；渲染失败则保留原始代码并显示错误提示）
+    html = renderMermaidBlocks(html);
 
-    return styled;
+    // P3-M02 子项3: 返回 body-only HTML（不再嵌入 <style>）
+    // CSS 由 MarkdownMode 通过 QTextDocument::setDefaultStyleSheet 控制
+    // （主题预设 dark/light + 用户自定义 CSS 叠加）
+    return html;
 }
 
 QString MaddyParser::defaultStyleSheet()
 {
+    // P3-M02 子项3: 此方法保留以兼容 MdExporter 等外部调用方
+    // MarkdownMode 预览不再使用此方法（改用 MarkdownMode::buildPreviewCss）
     const auto& p = ThemeManager::instance().currentPalette();
     // 亮/暗主题判定 (与 ThemeManager/CommandPalette 一致: bgEditor.lightness() > 128)
     bool isLight = p.bgEditor.lightness() > 128;
@@ -109,4 +114,87 @@ QString MaddyParser::defaultStyleSheet()
         ".hl-fn { color: %16; }"
     ).arg(fg, accent, border, fgSec, codeBg, codeFg, codeBg, quoteBg, thBg,
           hlKw, hlStr, hlNum, hlCmt, hlPp, hlType, hlFn);
+}
+
+// ============================================================
+// P3-M02 子项5: mermaid 代码块渲染
+// ============================================================
+
+QString MaddyParser::renderMermaidBlocks(const QString& html)
+{
+    // 匹配 maddy 生成的 mermaid 代码块：
+    // <pre><code class="language-mermaid">...escaped code...</code></pre>
+    // 注意：maddy 的 CodeBlockParser 会转义 & < > 为 &amp; &lt; &gt;
+    static const QRegularExpression mermaidRe(
+        QStringLiteral("<pre><code class=\"language-mermaid\">(.*?)</code></pre>"),
+        QRegularExpression::DotMatchesEverythingOption
+    );
+
+    QString result = html;
+    auto it = mermaidRe.globalMatch(result);
+    QStringList replacements;
+    int matchCount = 0;
+
+    while (it.hasNext()) {
+        auto match = it.next();
+        QString escapedCode = match.captured(1);
+
+        // 反转义 HTML 实体（maddy 转义了 & < >）
+        QString mermaidCode = escapedCode;
+        mermaidCode.replace(QStringLiteral("&amp;"), QStringLiteral("&"))
+                   .replace(QStringLiteral("&lt;"), QStringLiteral("<"))
+                   .replace(QStringLiteral("&gt;"), QStringLiteral(">"))
+                   .replace(QStringLiteral("&quot;"), QStringLiteral("\""))
+                   .replace(QStringLiteral("&#39;"), QStringLiteral("'"));
+
+        QString replacement;
+        if (MermaidRenderer::isAvailable()) {
+            // 调用 mmdc 渲染 SVG（带缓存）
+            QByteArray svg = MermaidRenderer::renderToSvg(mermaidCode);
+            if (!svg.isEmpty()) {
+                // 渲染成功：嵌入 SVG
+                replacement = QStringLiteral("<div class=\"mermaid\">%1</div>")
+                    .arg(QString::fromUtf8(svg));
+            } else {
+                // 渲染失败：显示原始代码 + 错误提示
+                replacement = QStringLiteral(
+                    "<div style=\"border:1px solid #e74c3c;border-radius:6px;padding:10px;margin:10px 0;\">"
+                    "<div style=\"color:#e74c3c;font-size:12px;margin-bottom:6px;\">"
+                    "⚠ Mermaid 渲染失败（请检查 mmdc 安装与代码语法）"
+                    "</div>"
+                    "<pre><code class=\"language-mermaid\">%1</code></pre>"
+                    "</div>"
+                ).arg(escapedCode);
+            }
+        } else {
+            // mmdc 不可用：显示原始代码 + 提示
+            replacement = QStringLiteral(
+                "<div style=\"border:1px solid #f39c12;border-radius:6px;padding:10px;margin:10px 0;\">"
+                "<div style=\"color:#f39c12;font-size:12px;margin-bottom:6px;\">"
+                "⚠ Mermaid CLI (mmdc) 未安装，无法渲染图表（已显示原始代码）"
+                "</div>"
+                "<pre><code class=\"language-mermaid\">%1</code></pre>"
+                "</div>"
+            ).arg(escapedCode);
+        }
+        replacements.append(replacement);
+        ++matchCount;
+    }
+
+    if (matchCount == 0) return result;
+
+    // 重新执行替换（避免索引偏移）
+    it = mermaidRe.globalMatch(result);
+    int idx = 0;
+    int lastEnd = 0;
+    QString out;
+    out.reserve(result.size());
+    while (it.hasNext()) {
+        auto match = it.next();
+        out += result.mid(lastEnd, match.capturedStart() - lastEnd);
+        out += replacements.at(idx++);
+        lastEnd = match.capturedEnd();
+    }
+    out += result.mid(lastEnd);
+    return out;
 }

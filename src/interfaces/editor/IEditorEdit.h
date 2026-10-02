@@ -4,6 +4,7 @@
 #include <QString>
 #include <QTextCursor>
 #include <QStringList>
+#include "core/lsp/LspTypes.h"  // R3: LspHighlightState（双轨高亮降级）
 
 class ICompleter;
 
@@ -47,6 +48,10 @@ public:
     virtual void setCompleter(ICompleter* completer) = 0;
     virtual ICompleter* completer() const = 0;
     virtual void updateWordList() = 0;
+
+    // === R3: LSP 高亮状态（双轨高亮降级，通过接口统一）===
+    /// 设置 LSP 高亮状态，控制启发式兜底的启用/禁用
+    virtual void setLspHighlightState(LspHighlightState state) = 0;
 
     // === 获取底层QWidget指针（用于布局管理和信号连接）===
     virtual QWidget* asWidget() = 0;

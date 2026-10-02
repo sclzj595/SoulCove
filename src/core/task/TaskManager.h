@@ -94,6 +94,18 @@ public:
     /// @brief 保存任务到 .vscode/tasks.json 格式文件
     bool saveTasksJson(const QString& filePath);
 
+    // ========== P3-M04 子项2: 导入/导出（通过 TasksJsonParser，与现有任务合并）==========
+
+    /// @brief 从 VSCode tasks.json 文件导入任务（合并到现有任务列表，相同 label 覆盖）
+    /// @param filePath tasks.json 文件路径
+    /// @return 成功导入至少 1 个任务返回 true
+    bool importTasksJson(const QString& filePath);
+
+    /// @brief 导出当前所有任务到 VSCode tasks.json 文件
+    /// @param filePath 目标文件路径
+    /// @return 写入成功返回 true
+    bool exportTasksJson(const QString& filePath) const;
+
     // ========== 默认任务模板 ==========
 
     /// @brief 创建常用构建/测试/格式化任务的默认模板

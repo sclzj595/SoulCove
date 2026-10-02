@@ -3,6 +3,7 @@
 
 #include "interfaces/lsp/ILspClient.h"
 #include "interfaces/ui/ITabWidget.h"
+#include "core/lsp/LspTypes.h"  // R1: LspHighlightState 枚举
 
 #include <QObject>
 #include <QString>
@@ -55,6 +56,8 @@ public:
     void requestDefinition(const QString& filePath, int line, int col);
     void requestReferences(const QString& filePath, int line, int col);
     void requestSymbols(const QString& filePath);
+    /// P0 C03: 请求跳转实现（透传 LspManager）
+    void requestImplementation(const QString& filePath, int line, int col);
 
     // === 状态查询（透传 LspManager） ===
     bool hasServerForFile(const QString& filePath) const;
@@ -70,6 +73,8 @@ signals:
     void symbolsReady(const QString& filePath, const QList<QVariantMap>& symbols);
     void serverError(const QString& filePath, const QString& error);
     void serverNotAvailable(const QString& langId);
+    // R3: lspStateChanged 不再对外暴露 — Coordinator 内部路由到编辑器
+    // Widget 无需连接此信号，消除语言匹配逻辑
 
 private slots:
     // === 内部路由处理 ===
@@ -80,6 +85,9 @@ private slots:
     void onReferencesReady(const QString& filePath, const QList<QVariantMap>& references);
     void onSymbolsReady(const QString& filePath, const QList<QVariantMap>& symbols);
     void onServerError(const QString& filePath, const QString& error);
+    /// R3: LSP 状态变化 → 遍历所有编辑器，更新匹配语言的高亮状态
+    /// Coordinator 内部路由，Widget 不再参与语言匹配
+    void onLspStateChanged(const QString& langId, LspHighlightState state);
 
 private:
     /// 按 filePath 在标签页中查找对应编辑器（路径标准化比较）

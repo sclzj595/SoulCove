@@ -9,6 +9,7 @@
 #include <QDebug>
 #include <QUuid>
 #include <QCoreApplication>
+#include <QRegularExpression>
 
 // ========== 单例 ==========
 
@@ -135,9 +136,13 @@ CodeSnippet SnippetManager::findTrigger(const QString& prefix) const
 
 // ========== 展开 snippet ==========
 
-QString SnippetManager::expandSnippet(const CodeSnippet& snippet)
+QString SnippetManager::expandSnippet(const CodeSnippet& snippet, const QString& selection)
 {
     QString body = snippet.body;
+
+    // P2-H02 子项2: $SELECTION 变量替换为编辑器选中文本（为空则替换为空串）
+    // 注意: 必须在 $N 占位符替换之前处理，避免 $SELECTION 误匹配 $N 规则
+    body.replace(QStringLiteral("$SELECTION"), selection);
 
     // 将 ${1:default} 格式的占位符替换为 <|1|> 标记
     // 将 $1, $2 格式替换为 <|1|>, <|2|> 标记
@@ -158,6 +163,119 @@ QString SnippetManager::expandSnippet(const CodeSnippet& snippet)
 }
 
 // ========== 持久化（JSON）==========
+
+// ========== VSCode 格式兼容（P2-H02 子项3）==========
+// VSCode snippet 格式: { "名称": { "prefix","body":["行1","行2"],"description" } }
+// 内部 body 为带 \n 的字符串，VSCode 为字符串数组，转换时正确拆分/合并。
+
+bool SnippetManager::importFromVscodeJson(const QString& filePath, const QString& language)
+{
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        LOG_DEBUG_S("SnippetManager", "importFromVscodeJson", "无法读取文件:" << filePath << file.errorString());
+        return false;
+    }
+
+    QByteArray data = file.readAll();
+    file.close();
+
+    QJsonParseError parseError;
+    QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        LOG_DEBUG_S("SnippetManager", "importFromVscodeJson", "JSON 解析失败:" << parseError.errorString());
+        return false;
+    }
+
+    // 导入语言：传入为空时使用 "all"
+    QString lang = language.isEmpty() ? QStringLiteral("all") : language;
+    QDateTime now = QDateTime::currentDateTime();
+    int imported = 0;
+
+    QJsonObject root = doc.object();
+    for (auto it = root.constBegin(); it != root.constEnd(); ++it) {
+        QString name = it.key();
+        QJsonObject obj = it.value().toObject();
+        if (obj.isEmpty()) continue;
+
+        CodeSnippet s;
+        s.id = generateId();
+        s.name = name;
+        s.prefix = obj.value(QStringLiteral("prefix")).toString();
+        s.description = obj.value(QStringLiteral("description")).toString();
+        s.language = lang;
+        s.shortcut.clear();
+
+        // body 字段：VSCode 为字符串数组，合并为带 \n 的字符串
+        QJsonValue bodyVal = obj.value(QStringLiteral("body"));
+        if (bodyVal.isArray()) {
+            QJsonArray bodyArr = bodyVal.toArray();
+            QStringList lines;
+            lines.reserve(bodyArr.size());
+            for (const QJsonValue& line : bodyArr)
+                lines.append(line.toString());
+            s.body = lines.join(QStringLiteral("\n"));
+        } else {
+            s.body = bodyVal.toString();
+        }
+
+        s.createdTime = now;
+        s.modifiedTime = now;
+
+        if (!s.name.isEmpty()) {
+            m_snippets[s.id] = s;
+            ++imported;
+        }
+    }
+
+    if (imported > 0)
+        saveToFile();
+
+    LOG_DEBUG_S("SnippetManager", "importFromVscodeJson", "从 VSCode 格式导入" << imported << "个片段 (language=" << lang << ")");
+    return imported > 0;
+}
+
+bool SnippetManager::exportToVscodeJson(const QString& filePath, const QString& language) const
+{
+    QJsonObject root;
+    bool filterByLang = !language.isEmpty();
+    int exported = 0;
+
+    for (auto it = m_snippets.constBegin(); it != m_snippets.constEnd(); ++it) {
+        const CodeSnippet& s = it.value();
+        // 按语言过滤：指定语言时仅导出该语言 + "all" 通用片段
+        if (filterByLang && s.language != language && s.language != QStringLiteral("all"))
+            continue;
+
+        QJsonObject obj;
+        obj[QStringLiteral("prefix")] = s.prefix;
+        // body 字段：内部字符串按 \n 拆分为 VSCode 字符串数组
+        QJsonArray bodyArr;
+        const QStringList lines = s.body.split(QStringLiteral("\n"));
+        for (const QString& line : lines)
+            bodyArr.append(line);
+        obj[QStringLiteral("body")] = bodyArr;
+        obj[QStringLiteral("description")] = s.description;
+
+        // VSCode 以片段名为 key；同名时追加语言后缀避免覆盖
+        QString key = s.name;
+        if (root.contains(key))
+            key = QStringLiteral("%1 (%2)").arg(s.name, s.language);
+        root[key] = obj;
+        ++exported;
+    }
+
+    QJsonDocument doc(root);
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        LOG_DEBUG_S("SnippetManager", "exportToVscodeJson", "无法写入文件:" << filePath << file.errorString());
+        return false;
+    }
+    file.write(doc.toJson(QJsonDocument::Indented));
+    file.close();
+
+    LOG_DEBUG_S("SnippetManager", "exportToVscodeJson", "已导出" << exported << "个片段到 VSCode 格式" << filePath);
+    return exported > 0;
+}
 
 void SnippetManager::saveToFile()
 {

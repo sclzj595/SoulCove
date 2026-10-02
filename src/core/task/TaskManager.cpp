@@ -1,4 +1,5 @@
 #include "core/task/TaskManager.h"
+#include "core/task/TasksJsonParser.h"  // P3-M04 子项2: 导入/导出
 #include "Logger.hpp"
 
 #include <QCoreApplication>
@@ -329,6 +330,54 @@ void TaskManager::parseVsCodeTasksJson(const QJsonDocument& doc)
             m_tasks[t.label] = t;
         }
     }
+}
+
+// ============================================================
+// P3-M04 子项2: 导入/导出（通过 TasksJsonParser，与现有任务合并）
+// ============================================================
+
+bool TaskManager::importTasksJson(const QString& filePath)
+{
+    QList<TaskItem> imported = TasksJsonParser::parseFile(filePath);
+    if (imported.isEmpty()) {
+        LOG_WARN_S("TaskManager", "importTasksJson", "导入失败或文件无任务:" << filePath);
+        return false;
+    }
+
+    int mergedCount = 0;
+    for (const TaskItem& t : imported) {
+        if (t.label.isEmpty()) continue;
+        // 合并策略：相同 label 直接覆盖（保留运行时状态 exitCode/lastRun）
+        TaskItem existing = m_tasks.value(t.label);
+        TaskItem merged = t;
+        if (existing.label == t.label) {
+            merged.exitCode = existing.exitCode;
+            merged.lastRun  = existing.lastRun;
+        }
+        m_tasks[t.label] = merged;
+        ++mergedCount;
+    }
+
+    LOG_DEBUG_S("TaskManager", "importTasksJson",
+                "从" << filePath << "导入了" << mergedCount << "个任务");
+    return mergedCount > 0;
+}
+
+bool TaskManager::exportTasksJson(const QString& filePath) const
+{
+    QString jsonText = TasksJsonParser::toJson(m_tasks.values());
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        LOG_WARN_S("TaskManager", "exportTasksJson", "无法写入文件:" << filePath);
+        return false;
+    }
+    file.write(jsonText.toUtf8());
+    file.close();
+
+    LOG_DEBUG_S("TaskManager", "exportTasksJson",
+                "已导出" << m_tasks.size() << "个任务到" << filePath);
+    return true;
 }
 
 // ============================================================

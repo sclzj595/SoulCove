@@ -74,6 +74,33 @@ QString MdExporter::toHtmlString(const QString& markdown,
     return generateHtmlDocument(htmlBody, options);
 }
 
+// ============================================================
+// P3-M02 子项4: 复制为富文本
+// 与 toHtmlString 的差异：
+// - 关闭 TOC 导航（剪贴板富文本不需要目录）
+// - 不带页脚（粘贴到 Word/邮件时无干扰）
+// - 使用与导出一致的 inline-style HTML，保证 QTextDocument/QClipboard 渲染保真
+// ============================================================
+
+QString MdExporter::copyAsRichText(const QString& markdown)
+{
+    QString htmlBody;
+
+    if (m_parser) {
+        htmlBody = m_parser->toHtml(markdown);
+    } else {
+        // Fallback: 简单包装（行内 code/标题等格式丢失但内容保留）
+        htmlBody = QStringLiteral("<pre>%1</pre>").arg(markdown.toHtmlEscaped());
+    }
+
+    // 关闭 TOC，避免在富文本中插入导航块（Word/邮件不友好）
+    ExportOptions opts;
+    opts.includeToc = false;
+
+    // 复用 generateHtmlDocument 的内联样式生成逻辑（含 h1~h6/code/pre/table 等完整样式）
+    return generateHtmlDocument(htmlBody, opts);
+}
+
 QString MdExporter::fileFilter()
 {
     return QStringLiteral(

@@ -12,8 +12,14 @@ public:
     QString toHtml(const QString& markdown) override;
     QString name() const override { return QStringLiteral("maddy"); }
 
-    /// 根据当前主题动态生成 CSS 样式（用于嵌入 HTML head）
+    /// 根据当前主题动态生成 CSS 样式（保留以兼容 MdExporter 等外部调用方）
     static QString defaultStyleSheet();
+
+private:
+    /// @brief P3-M02 子项5: 在 HTML 中查找 mermaid 代码块并渲染为 SVG
+    /// @param html maddy 解析后的 HTML（含 <pre><code class="language-mermaid"> 块）
+    /// @return 替换 mermaid 块为 SVG 后的 HTML
+    static QString renderMermaidBlocks(const QString& html);
 };
 
 #endif // MADDYPARSER_H

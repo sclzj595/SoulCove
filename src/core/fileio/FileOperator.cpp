@@ -98,8 +98,9 @@ bool FileOperator::saveFile(const QString& filePath)
     }
 
     // 每次保存重新打开文件写入，不依赖已打开的句柄
+    // P3-M03 子项1: 不使用 QIODevice::Text（避免 Qt 自动行尾转换覆盖我们的 EOL 设置）
     QFile outFile(targetPath);
-    if (!outFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    if (!outFile.open(QIODevice::WriteOnly)) {
         LOG_DEBUG_S("FileOperator", "saveFile", "保存文件失败:" << targetPath);
         return false;
     }
@@ -109,6 +110,9 @@ bool FileOperator::saveFile(const QString& filePath)
     // 获取编辑器内容并写入
     if (m_contentReader) {
         QString content = m_contentReader();
+
+        // P3-M03 子项1: 按当前 EOL 模式统一行尾
+        content = convertEol(content);
 
         // GBK特殊处理（需要QTextCodec）
         if (m_encoding.compare("GBK", Qt::CaseInsensitive) == 0) {
@@ -216,4 +220,22 @@ QStringConverter::Encoding FileOperator::resolveEncoding(const QString& encoding
         return opt.value();
     LOG_DEBUG_S("FileOperator", "resolveEncoding", "不支持的编码格式，默认UTF-8:" << encodingName);
     return QStringConverter::Utf8;
+}
+
+// P3-M03 子项1: 按当前 EOL 模式统一行尾
+// Qt 内部文本使用单个 '\n'（U+000A）作为段落分隔符，将其转换为指定的 EOL 序列
+QString FileOperator::convertEol(const QString& content) const
+{
+    if (m_eolMode.isEmpty() ||
+        m_eolMode.compare(QStringLiteral("LF"), Qt::CaseInsensitive) == 0) {
+        // LF: 保持 \n（无需转换）
+        return content;
+    }
+    if (m_eolMode.compare(QStringLiteral("CRLF"), Qt::CaseInsensitive) == 0) {
+        return QString(content).replace(QChar('\n'), QStringLiteral("\r\n"));
+    }
+    if (m_eolMode.compare(QStringLiteral("CR"), Qt::CaseInsensitive) == 0) {
+        return QString(content).replace(QChar('\n'), QChar('\r'));
+    }
+    return content;
 }

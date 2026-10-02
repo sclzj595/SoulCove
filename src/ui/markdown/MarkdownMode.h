@@ -54,6 +54,15 @@ public:
     /// @brief 获取TOC面板（供外部使用）
     class MdTocPanel* tocPanel() const { return m_tocPanel; }
 
+    /// @brief 设置当前文件路径（用于 TOC 折叠状态按文件记忆）
+    void setFilePath(const QString& filePath);
+
+    /// @brief 获取当前文件路径
+    QString filePath() const { return m_filePath; }
+
+    /// @brief 复制当前 Markdown 为富文本到剪贴板（P3-M02 子项4）
+    void copyAsRichText();
+
 signals:
     void contentChanged();
 
@@ -85,6 +94,9 @@ private:
     // 滚动同步防循环标志 (避免编辑器<->预览互相触发死循环)
     bool m_syncingScroll = false;
 
+    // P3-M02 子项1: 当前文件路径（用于 TOC 折叠状态按文件记忆）
+    QString m_filePath;
+
     // D5: TOC数据结构
     struct TocItem {
         int level;
@@ -108,6 +120,16 @@ private:
 
     /// @brief 处理预览区图片点击事件（调用ImageLightBox）
     bool eventFilter(QObject* obj, QEvent* event) override;
+
+    // === P3-M02 子项2+3: CSS 预设与用户自定义 CSS ===
+    /// @brief 暗色主题 CSS 预设（深色背景 + 浅色文字 + 链接 + 代码块）
+    static QString darkCssPreset();
+    /// @brief 浅色主题 CSS 预设（浅色背景 + 深色文字）
+    static QString lightCssPreset();
+    /// @brief 构建预览区 CSS：主题预设 + 用户自定义 CSS（叠加在预设之上）
+    QString buildPreviewCss() const;
+    /// @brief 应用 CSS 到预览区 QTextDocument
+    void applyPreviewCss();
 };
 
 #endif // MARKDOWNMODE_H

@@ -7,13 +7,13 @@
 #include <QHBoxLayout>
 #include <QStackedWidget>
 #include <QLabel>
+#include <QVariantMap>
 
 #include "core/config/ThemeManager.h"
 #include "interfaces/ui/ISideFileBar.h"
 
 class GitPanel;
 class TaskManager;  // M15: 任务管理器（前向声明）
-class OutlinePanel;  // V1.9: 大纲面板（已抽出）
 class TasksPanel;    // M15: 任务面板（已抽出）
 class SearchPanel;   // 搜索面板（已抽出）
 class ExplorerPanel; // 资源管理器面板（已抽出）
@@ -32,9 +32,7 @@ public:
         Explorer,   // 文件资源管理器
         Search,     // 搜索
         Git,        // Git版本控制
-        Tasks,      // M15: 任务系统
-        Outline,    // V1.9: 大纲（符号导航）
-        Extensions  // 扩展
+        Tasks       // M15: 任务系统
     };
 
     explicit SideBar(QWidget* parent = nullptr);
@@ -69,6 +67,17 @@ public:
     /// @brief V1.9: 清空工作区所有文件夹
     void clearWorkspace();
 
+    /// @brief P2-H04: 设置工作区文件夹列表（多文件夹模式，切换工作区时调用）
+    /// 清空当前工作区并替换为新的文件夹列表（触发文件树重建）
+    void setWorkspaceFolders(const QStringList& folders);
+
+    /// @brief P2-H04: 按路径从工作区移除文件夹（多文件夹模式）
+    /// @return 是否移除成功（不存在则返回 false）
+    bool removeWorkspaceFolderByPath(const QString& folder);
+
+    /// @brief P2-H04: 获取内嵌的 ExplorerPanel 实例（供 Widget 直接调用）
+    ExplorerPanel* explorerPanel() const { return m_explorerPanel; }
+
     /// @brief 根据文件路径高亮选中侧边栏对应项（Tab→Sidebar同步）
     void selectFileByPath(const QString& filePath);
 
@@ -81,18 +90,24 @@ public:
     /// @brief 获取内嵌的 GitPanel 实例
     GitPanel* gitPanelWidget() const { return m_gitPanelWidget; }
 
-    /// @brief V1.9: 更新大纲面板（由 Widget 层在 LSP symbolsReady 时调用）
-    /// @param filePath 当前文件路径
-    /// @param symbols LSP documentSymbol 响应（QVariantMap 列表，含 name/kind/range/children）
-    void updateOutline(const QString& filePath, const QList<QVariantMap>& symbols);
+    /// @brief P3-M04 子项1/3: 获取内嵌的 TasksPanel 实例（供 Widget 连接 jumpToLocationRequested 等信号）
+    TasksPanel* tasksPanel() const { return m_tasksPanel; }
 
-    /// @brief V1.9: 清空大纲面板（文件关闭时调用）
+    /// @brief V2.1: 更新大纲符号（LSP documentSymbol 响应）
+    /// 由 Widget::onLspSymbolsReady 调用，委托给 ExplorerPanel 内嵌的大纲区域
+    void updateOutlineForEditor(const QString& filePath, const QList<QVariantMap>& symbols);
+
+    /// @brief V2.1: 离线正则扫描更新大纲（无 LSP 时的 fallback）
+    void updateOutlineFromText(const QString& filePath, const QString& content);
+
+    /// @brief V2.1: 清空大纲（文件关闭时调用）
     void clearOutline();
 
-    /// @brief V1.9: 离线正则扫描符号并更新大纲（无 LSP 时的 fallback）
-    /// @param filePath 当前文件路径
-    /// @param content 文件内容
-    void updateOutlineFromText(const QString& filePath, const QString& content);
+    /// @brief V2.1 C3: 立即同步文件路径（LSP 异步请求期间防止错误跳转）
+    void resetOutlineFilePath(const QString& filePath);
+
+    /// V2.1 M2/M3: 持久化 ExplorerPanel + OutlinePanel 状态到磁盘
+    void savePanelStates();
 
 signals:
     /// @brief 文件列表中的文件被双击打开
@@ -107,8 +122,11 @@ signals:
     /// @brief V1.9: 请求移动文件（拖拽）— 参数：源路径、目标目录
     void fileMoveRequested(const QString& sourcePath, const QString& targetDir);
 
-    /// @brief V1.9: 大纲符号被点击 — 参数：文件路径、行号(0-based)、列号(0-based)
-    void outlineSymbolClicked(const QString& filePath, int line, int col);
+    /// @brief V1.9: 定位请求（搜索结果点击跳转，复用大纲跳转路径）
+    /// @param filePath 文件路径
+    /// @param line 行号(0-based)
+    /// @param col 列号(0-based)
+    void outlineSymbolClicked(const QString& filePath, int line, int col, int endLine, int endCol);
 
     /// @brief V1.9: 工作区文件夹变更 — 参数：所有文件夹路径
     void workspaceFoldersChanged(const QStringList& folders);
@@ -159,8 +177,6 @@ private:
     QPushButton*  m_btnSearch;
     QPushButton*  m_btnGit;
     QPushButton*  m_btnTasks;          // M15: 任务按钮
-    QPushButton*  m_btnOutline = nullptr;   // V1.9: 大纲按钮
-    QPushButton*  m_btnExtensions;
     QPushButton*  m_btnTerminal;      // 终端切换按钮
 
     // === Explorer 面板（已抽出为 ExplorerPanel）===
@@ -175,12 +191,6 @@ private:
 
     // === Tasks 面板（M15: 任务系统，已抽出为 TasksPanel）===
     TasksPanel*    m_tasksPanel = nullptr;  // 任务面板（拥有 tree/output/buttons）
-
-    // === Outline 面板（V1.9: 大纲/符号导航，已抽出为 OutlinePanel）===
-    OutlinePanel*  m_outlinePanel = nullptr;  // 大纲面板（拥有 tree/hint/filePath）
-
-    // === Extensions 面板 ===
-    QWidget*       m_extensionsPanel;
 
     Activity m_currentActivity = Activity::Explorer;
 

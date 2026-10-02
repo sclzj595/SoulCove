@@ -12,7 +12,10 @@
 #include <QKeyEvent>
 #include <QMap>
 #include <QSet>
+#include <QHash>
 #include <QElapsedTimer>
+
+class CompletionPreviewWidget;
 
 /// @brief 自动补全提示框组件
 /// 实现ICompleter接口，提供词库加载、联想匹配、弹窗展示能力
@@ -38,10 +41,22 @@ private:
     void applyTheme();
     // 应用配置中的字体大小（与编辑器/设置页联动）
     void applyFontSize();
+	// P0 C04-1: LSP kind 字符串 → 短类型标签（用于补全项视觉区分）
+	QString lspKindToTag(const QString& kind) const;
+	// C04-11: 同步预览面板位置（补全弹窗右侧）
+	void syncPreviewPosition();
+	// C04-11: 根据当前选中项刷新预览面板内容
+	void updatePreviewForCurrentItem();
+	// C04-11: 同步预览面板的显示/隐藏状态
+	void syncPreviewVisibility();
 
 protected:
 	void keyPressEvent(QKeyEvent* event) override;
 	bool event(QEvent* event) override;
+	/// H3: 弹窗隐藏时清除成员补全模式标志（覆盖所有隐藏路径，包括 Qt::Popup 自动隐藏）
+	void hideEvent(QHideEvent* event) override;
+	/// C04-11: 弹窗位置变化时同步移动预览面板
+	void moveEvent(QMoveEvent* event) override;
 
 public:
 	TextCompleter(QWidget* parent = nullptr);
@@ -70,6 +85,15 @@ public:
 	void setLspCompletionItems(const QList<LspCompletionItem>& items);
 	/// @brief 清除 LSP 补全候选项
 	void clearLspCompletionItems();
+
+	// ========== H3: 成员补全自动触发（. / -> / ::）==========
+	/// @brief 进入成员补全模式 — 跳过最小前缀检查，允许空前缀显示 LSP 候选
+	/// 在用户输入 . / -> / :: 后由 MyTextEdit 调用，配合 requestLspCompletion 使用
+	void triggerMemberCompletion() override;
+	/// @brief 退出成员补全模式
+	void clearMemberCompletion() override;
+	/// @brief 当前是否处于成员补全模式
+	bool isMemberCompletionMode() const override { return m_memberCompletionMode; }
 
 	enum MatchingMode {
 		// 三种匹配模式
@@ -102,6 +126,10 @@ private slots:
 
 	// 延迟显示补全框
 	void delayedShow();
+	// P2: 节流防抖到期后执行实际的补全列表更新
+	void performCompletionUpdate();
+	// C04-11: 选中项变化时更新预览面板内容
+	void onCurrentItemChanged(QListWidgetItem* current, QListWidgetItem* previous);
 
 private:
 	// 私有字段 属性 
@@ -124,13 +152,30 @@ private:
 	QString m_cachedDocHash;       // 文档内容MD5哈希（用于检测文档是否真正变化）
 	QStringList m_cachedWordList;   // 缓存的候选词列表
 	QElapsedTimer m_lastUpdateTime; // 上次更新时间戳（用于节流）
+	int m_lastDocLength = -1;       // P2: 文档长度缓存（O(1) 快速判断是否需要 MD5）
+
+	// P2: 200ms 节流防抖定时器 — 快速连续输入时丢弃中间查询，仅保留最后一次
+	QTimer m_debounceTimer;
 
 	// [LSP 补全] 语言服务器返回的候选项（优先于本地词典）
 	QList<LspCompletionItem> m_lspItems;
 
+	// P0 C04-2: LSP 补全结果缓存 — 按前缀缓存，LSP 响应延迟时立即显示缓存结果
+	// 避免快速连续输入时弹窗空白闪烁
+	QHash<QString, QList<LspCompletionItem>> m_lspCompletionCache;
+	static constexpr int kMaxLspCacheEntries = 16;  // 缓存上限（超过时清空重建）
+
+	// H3: 成员补全模式标志 — 输入 . / -> / :: 后置为 true，跳过最小前缀检查
+	bool m_memberCompletionMode = false;
+	// H3: 待处理成员补全标志 — 等待 LSP 响应期间为 true，收到响应后显示弹窗
+	bool m_pendingMemberCompletion = false;
+
 	// 自定义 data role：区分 LSP 项 vs 本地词典项
 	static constexpr int RoleLspItem = Qt::UserRole + 100;  // 存储 LspCompletionItem 指针索引
 	static constexpr int RoleIsLsp = Qt::UserRole + 101;    // 是否为 LSP 项
+
+	// C04-11: 预览面板（位于补全弹窗右侧）
+	CompletionPreviewWidget* m_previewWidget = nullptr;
 
 };
 

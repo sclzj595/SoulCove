@@ -62,6 +62,8 @@ EditorTabBar::EditorTabBar(QWidget* parent)
 
     // 安装事件过滤器以检测标签拖出独立窗口（V1.9）
     m_tabBar->installEventFilter(this);
+
+    // R4: 闲置检测已提取到 IdleTabTracker，EditorTabBar 不再负责 LSP 文档生命周期
 }
 
 // ========== 标签页管理 ==========
@@ -94,8 +96,9 @@ void EditorTabBar::openFileTab(const QString& filePath, const QString& content)
 {
     if (filePath.isEmpty()) {
         addNewTab();
-        if (currentEditor())
-            currentEditor()->setPlainText(content);
+        // J1: 使用静默设置文本，抑制 textChanged 引发的补全弹窗
+        if (auto* ed = qobject_cast<MyTextEdit*>(currentEditor()->asWidget()))
+            ed->setPlainTextSilently(content);
         return;
     }
 
@@ -197,7 +200,8 @@ void EditorTabBar::openFileTab(const QString& filePath, const QString& content)
     QString displayName = fi.fileName();
 
     MyTextEdit* editor = createEditor();
-    editor->setPlainText(content);
+    // J1: 使用静默设置文本，抑制 textChanged 引发的补全弹窗，避免打开文件时编辑器卡顿
+    editor->setPlainTextSilently(content);
 
     // 根据文件后缀启用语法高亮（使用高亮器支持的语言列表）
     QString suffix = fi.suffix().toLower();
@@ -266,7 +270,7 @@ int EditorTabBar::findCustomTabIndex(const QString& title) const
     return -1;
 }
 
-QList<MyTextEdit*> EditorTabBar::allEditors() const
+QList<MyTextEdit*> EditorTabBar::allMyTextEditors() const
 {
     QList<MyTextEdit*> editors;
     for (auto it = m_tabDataMap.begin(); it != m_tabDataMap.end(); ++it) {
@@ -292,6 +296,9 @@ void EditorTabBar::openMarkdownTab(const QString& filePath, const QString& conte
 
     // 创建 MarkdownMode 分屏组件（左侧编辑 + 右侧预览）
     auto* mdMode = new MarkdownMode(m_editorStack);
+
+    // P3-M02 子项1: 传递文件路径给 MarkdownMode（用于 TOC 折叠状态按文件记忆）
+    mdMode->setFilePath(filePath);
 
     // 获取内部编辑器用于 TabData 关联
     MyTextEdit* editor = mdMode->editor();
@@ -527,6 +534,11 @@ bool EditorTabBar::closeTab(int index)
         removeWidget->deleteLater();
     }
 
+    // P0-4: 通知 LSP 发送 didClose 释放文档（在移除标签数据前，filePath 仍可用）
+    if (!data.filePath.isEmpty()) {
+        emit fileClosed(data.filePath);
+    }
+
     // 移除标签和数据
     m_tabBar->removeTab(index);
     m_tabDataMap.remove(index);
@@ -604,6 +616,19 @@ void EditorTabBar::setCurrentFilePath(const QString& path)
         it.value().displayName = fi.fileName();
         m_tabBar->setTabText(idx, it.value().displayName);
     }
+}
+
+// R3: 实现 ITabWidget::allEditors() — 供 LspCoordinator 遍历编辑器进行状态路由
+QList<QPair<QString, IEditorEdit*>> EditorTabBar::allEditors() const
+{
+    QList<QPair<QString, IEditorEdit*>> result;
+    for (auto it = m_tabDataMap.constBegin(); it != m_tabDataMap.constEnd(); ++it) {
+        const TabData& data = it.value();
+        if (data.editor) {
+            result.append({data.filePath, data.editor});
+        }
+    }
+    return result;
 }
 
 const TabData* EditorTabBar::currentTabData() const
@@ -706,22 +731,26 @@ void EditorTabBar::onTabChanged(int index)
 {
     auto it = m_tabDataMap.find(index);
     if (it != m_tabDataMap.end()) {
+        TabData& data = it.value();
+
+        // R4: 闲置检测已提取到 IdleTabTracker，onTabChanged 只负责 UI 切换
+
         QWidget* targetWidget = nullptr;
 
-        if (it.value().isSpecial && it.value().customWidget) {
-            targetWidget = it.value().customWidget;
+        if (data.isSpecial && data.customWidget) {
+            targetWidget = data.customWidget;
             m_editorStack->setCurrentWidget(targetWidget);
-            if (it.value().editor) {
-                it.value().editor->setFocus();
-                emit currentEditorChanged(it.value().editor);
+            if (data.editor) {
+                data.editor->setFocus();
+                emit currentEditorChanged(data.editor);
             } else {
                 emit currentEditorChanged(nullptr);
             }
-        } else if (it.value().editor) {
-            targetWidget = it.value().editor;
+        } else if (data.editor) {
+            targetWidget = data.editor;
             m_editorStack->setCurrentWidget(targetWidget);
-            it.value().editor->setFocus();
-            emit currentEditorChanged(it.value().editor);
+            data.editor->setFocus();
+            emit currentEditorChanged(data.editor);
         }
 
         // Tab切换淡入动画
@@ -771,3 +800,5 @@ void EditorTabBar::refreshAllEditors()
         }
     }
 }
+
+// R4: onIdleCheck 已提取到 IdleTabTracker（单一职责原则）

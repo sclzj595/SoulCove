@@ -1,5 +1,6 @@
 #include "core/lsp/LspManager.h"
 #include "core/lsp/LspClient.h"
+#include "core/lsp/LanguageRegistry.h"  // R2: 语言注册表（单一数据源）
 #include "core/config/ConfigManager.h"
 #include "Logger.hpp"
 
@@ -8,6 +9,12 @@
 #include <QDir>
 #include <QStandardPaths>
 #include <QProcessEnvironment>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QJsonParseError>
+#include <QTimer>
 
 // ============================================================
 // 构造 / 析构
@@ -20,6 +27,8 @@ LspManager::LspManager(QObject* parent)
 
 LspManager::~LspManager()
 {
+    // P0-2: 设置关闭标志，阻止 serverStopped 触发自动重连
+    m_shuttingDown = true;
     // RAII：析构时停止所有语言服务器
     for (auto it = m_clients.begin(); it != m_clients.end(); ++it) {
         if (it.value()) {
@@ -38,6 +47,13 @@ bool LspManager::openFile(const QString& filePath, const QString& content)
 {
     QString suffix = QFileInfo(filePath).suffix().toLower();
     QString langId = langIdForSuffix(suffix);
+
+    // L3: 无扩展名文件（如 C++ 标准库头文件 <vector> <algorithm>）默认按 cpp 处理
+    // 这类文件通常位于 MinGW/MSVC 的 include 目录中，跳转定义打开后需要 LSP 支持
+    if (langId.isEmpty() && suffix.isEmpty()) {
+        langId = QStringLiteral("cpp");
+        LOG_DEBUG("[LspManager] 无扩展名文件按 cpp 处理: " << filePath.toStdString());
+    }
 
     // 不支持的语言 — 静默跳过（不是错误）
     if (langId.isEmpty()) {
@@ -68,10 +84,9 @@ bool LspManager::openFile(const QString& filePath, const QString& content)
 
     // 服务器未运行 → 启动 + 初始化
     if (!client->isRunning()) {
-        QStringList args = serverArgs(langId);
-        // 修复 P0-2: 使用工作区根目录而非文件所在目录作为 clangd 的工作目录
-        // 否则 clangd 会把文件所在目录（如 src/）当作项目根目录，找不到 CMakeLists.txt
-        // 和头文件路径，导致全屏爆红
+        // L1: 先推断项目根目录，再传给 serverArgs() 用于查找 compile_commands.json
+        // 修复根因：原代码 serverArgs() 依赖 m_workspaceRoot，但用户可能未通过"打开文件夹"设置
+        // 导致 clangd 找不到 compile_commands.json，项目内 include 跳转失效
         QString workingDir = inferProjectRoot(filePath, m_workspaceRoot);
         if (workingDir.isEmpty()) {
             // 最终 fallback: 文件所在目录
@@ -80,6 +95,7 @@ bool LspManager::openFile(const QString& filePath, const QString& content)
                       << workingDir.toStdString());
         }
 
+        QStringList args = serverArgs(langId, workingDir);
         LOG_INFO("[LspManager] 启动 " << langId.toStdString() << " 语言服务器: " << cmd.toStdString());
         if (!client->startServer(cmd, args, workingDir)) {
             LOG_ERROR("[LspManager] 启动失败: " << cmd.toStdString());
@@ -138,11 +154,11 @@ void LspManager::closeFile(const QString& filePath)
     auto it = m_fileToLangId.find(filePath);
     if (it == m_fileToLangId.end()) return;
 
-    // 发送 didClose（LSP 协议要求）
+    // L3: 发送 didClose（LSP 协议要求），避免闲置标签重新激活时重复 didOpen
+    // clangd 收到 didClose 后释放 preamble 缓存，重新 didOpen 时才重建
     ILspClient* client = m_clients.value(it.value());
     if (client && client->isInitialized()) {
-        // LspClient 暂无 didClose 方法，通过 changeDocument 空内容近似处理
-        // 后续可在 ILspClient 添加 closeDocument 纯虚方法
+        client->closeDocument(filePathToUri(filePath));
     }
 
     m_fileToLangId.erase(it);
@@ -162,45 +178,80 @@ void LspManager::requestCompletion(const QString& filePath, int line, int col)
     ILspClient* client = m_clients.value(it.value());
     if (!client || !client->isInitialized()) return;
 
-    m_currentRequestFile = filePath;  // 记录当前请求文件（响应路由用）
+    m_currentCompletionFile = filePath;  // P0 C01: 按类型独立跟踪（响应路由用）
     client->requestCompletion(filePathToUri(filePath), line, col);
+}
+
+ILspClient* LspManager::resolveInitializedClient(const QString& filePath)
+{
+    // Bug2: 统一处理文件→客户端解析，未注册时按后缀回退注册，避免请求方法静默返回
+    QString langId;
+    auto it = m_fileToLangId.find(filePath);
+    if (it != m_fileToLangId.end()) {
+        langId = it.value();
+    } else {
+        // 后缀回退：推断语言 ID（无扩展名文件默认 cpp）
+        QString suffix = QFileInfo(filePath).suffix().toLower();
+        langId = langIdForSuffix(suffix);
+        if (langId.isEmpty() && suffix.isEmpty()) {
+            langId = QStringLiteral("cpp");
+        }
+        if (langId.isEmpty()) {
+            LOG_DEBUG("[LspManager] 文件语言不支持: " << filePath.toStdString());
+            return nullptr;
+        }
+        // 注册文件映射（不发送 didOpen，clangd 可处理未 didOpen 文件的请求）
+        m_fileToLangId[filePath] = langId;
+        QString uri = filePathToUri(filePath);
+        m_uriToFilePath[uri] = filePath;
+        LOG_DEBUG("[LspManager] 按后缀回退注册文件 " << filePath.toStdString()
+                  << " → " << langId.toStdString());
+    }
+
+    ILspClient* client = m_clients.value(langId);
+    if (!client) {
+        LOG_WARN("[LspManager] 无对应客户端 (" << filePath.toStdString() << ")");
+        return nullptr;
+    }
+    if (!client->isInitialized()) {
+        LOG_WARN("[LspManager] 服务器未完成握手，请求被丢弃 (" << filePath.toStdString() << ")");
+        return nullptr;
+    }
+    return client;
 }
 
 void LspManager::requestDefinition(const QString& filePath, int line, int col)
 {
-    auto it = m_fileToLangId.find(filePath);
-    if (it == m_fileToLangId.end()) return;
+    // Bug2: 使用 resolveInitializedClient 处理未注册文件的回退注册，避免静默返回
+    ILspClient* client = resolveInitializedClient(filePath);
+    if (!client) return;
 
-    ILspClient* client = m_clients.value(it.value());
-    if (!client) {
-        LOG_WARN("[LspManager] requestDefinition: 无对应客户端 (" << filePath.toStdString() << ")");
-        return;
-    }
-    if (!client->isInitialized()) {
-        LOG_WARN("[LspManager] requestDefinition: 服务器未完成握手，请求被丢弃 (" << filePath.toStdString() << ")");
-        return;
-    }
-
-    m_currentRequestFile = filePath;
+    m_currentDefinitionFile = filePath;  // P0 C01: 按类型独立跟踪
     client->requestDefinition(filePathToUri(filePath), line, col);
+    LOG_DEBUG("[LspManager] requestDefinition 已发送: " << filePath.toStdString()
+              << " line=" << line << " col=" << col);
+}
+
+void LspManager::requestImplementation(const QString& filePath, int line, int col)
+{
+    // P0 C03: 请求跳转实现 — 复用 definition 的路由和响应处理
+    // Bug2: 使用 resolveInitializedClient 处理未注册文件的回退注册
+    ILspClient* client = resolveInitializedClient(filePath);
+    if (!client) return;
+
+    // implementation 响应复用 definitionReady 信号，使用 m_currentDefinitionFile 路由
+    m_currentDefinitionFile = filePath;
+    client->requestImplementation(filePathToUri(filePath), line, col);
 }
 
 void LspManager::requestHover(const QString& filePath, int line, int col)
 {
-    auto it = m_fileToLangId.find(filePath);
-    if (it == m_fileToLangId.end()) return;
+    // Bug2: 使用 resolveInitializedClient 处理未注册文件的回退注册，避免静默返回
+    ILspClient* client = resolveInitializedClient(filePath);
+    if (!client) return;
 
-    ILspClient* client = m_clients.value(it.value());
-    if (!client) {
-        LOG_WARN("[LspManager] requestHover: 无对应客户端 (" << filePath.toStdString() << ")");
-        return;
-    }
-    if (!client->isInitialized()) {
-        LOG_WARN("[LspManager] requestHover: 服务器未完成握手，请求被丢弃 (" << filePath.toStdString() << ")");
-        return;
-    }
-
-    m_currentRequestFile = filePath;
+    // F4: hover 请求文件独立跟踪，不与 completion/definition 等共享 m_currentRequestFile
+    m_currentHoverFile = filePath;
     client->requestHover(filePathToUri(filePath), line, col);
 }
 
@@ -212,26 +263,17 @@ void LspManager::requestSymbols(const QString& filePath)
     ILspClient* client = m_clients.value(it.value());
     if (!client || !client->isInitialized()) return;
 
-    m_currentRequestFile = filePath;
+    // documentSymbol 已通过 requestId → uri 精确路由（LspClient::m_symbolRequestUri），无需 m_currentRequestFile
     client->requestSymbols(filePathToUri(filePath));
 }
 
 void LspManager::requestReferences(const QString& filePath, int line, int col)
 {
-    auto it = m_fileToLangId.find(filePath);
-    if (it == m_fileToLangId.end()) return;
+    // Bug2: 使用 resolveInitializedClient 处理未注册文件的回退注册，避免静默返回
+    ILspClient* client = resolveInitializedClient(filePath);
+    if (!client) return;
 
-    ILspClient* client = m_clients.value(it.value());
-    if (!client) {
-        LOG_WARN("[LspManager] requestReferences: 无对应客户端 (" << filePath.toStdString() << ")");
-        return;
-    }
-    if (!client->isInitialized()) {
-        LOG_WARN("[LspManager] requestReferences: 服务器未完成握手，请求被丢弃 (" << filePath.toStdString() << ")");
-        return;
-    }
-
-    m_currentRequestFile = filePath;
+    m_currentReferencesFile = filePath;  // P0 C01: 按类型独立跟踪
     client->requestReferences(filePathToUri(filePath), line, col);
 }
 
@@ -241,11 +283,28 @@ void LspManager::requestReferences(const QString& filePath, int line, int col)
 
 bool LspManager::hasServerForFile(const QString& filePath) const
 {
+    // 1. 检查文件是否已注册
     auto it = m_fileToLangId.find(filePath);
-    if (it == m_fileToLangId.end()) return false;
+    if (it != m_fileToLangId.end()) {
+        ILspClient* client = m_clients.value(it.value());
+        return client && client->isRunning();
+    }
 
-    ILspClient* client = m_clients.value(it.value());
-    return client && client->isRunning();
+    // L3: 文件未注册，检查同语言是否有运行中的服务器
+    // 场景：从 .cpp 跳转到标准库头文件（无扩展名），头文件可能尚未 didOpen
+    // 但 cpp 服务器已在运行，可以服务该文件
+    QString suffix = QFileInfo(filePath).suffix().toLower();
+    QString langId = langIdForSuffix(suffix);
+    // 无扩展名文件（标准库头文件）默认按 cpp 处理
+    if (langId.isEmpty() && suffix.isEmpty()) {
+        langId = QStringLiteral("cpp");
+    }
+    if (!langId.isEmpty()) {
+        ILspClient* client = m_clients.value(langId);
+        return client && client->isRunning();
+    }
+
+    return false;
 }
 
 bool LspManager::isServerInitialized(const QString& filePath) const
@@ -293,44 +352,51 @@ ILspClient* LspManager::getOrCreateClient(const QString& langId)
             this, &LspManager::onReferencesReady);
     connect(client, &ILspClient::serverError,
             this, &LspManager::onServerError);
+    // P0-2: 进程崩溃/异常退出 → 自动重连
+    connect(client, &ILspClient::serverStopped,
+            this, [this, langId]() { onServerStopped(langId); });
     // 握手完成 → flush 缓存的 didOpen（修复 LSP 时序）
     connect(client, &ILspClient::initialized,
             this, &LspManager::onClientInitialized);
 
     m_clients[langId] = client;
+
+    // P1-3: 服务器启动 → 状态变为 Initializing（高亮器启用启发式兜底）
+    emit lspStateChanged(langId, LspHighlightState::Initializing);
     return client;
 }
 
 QString LspManager::langIdForSuffix(const QString& suffix)
 {
-    // 文件后缀 → 内部语言ID
-    if (suffix == "cpp" || suffix == "c" || suffix == "h" ||
-        suffix == "hpp" || suffix == "cc" || suffix == "cxx" ||
-        suffix == "hxx" || suffix == "inl")
-        return QStringLiteral("cpp");
-    if (suffix == "py" || suffix == "pyw")
-        return QStringLiteral("python");
-    if (suffix == "js" || suffix == "jsx" || suffix == "mjs")
-        return QStringLiteral("javascript");
-    if (suffix == "ts" || suffix == "tsx")
-        return QStringLiteral("typescript");
-    if (suffix == "go")
-        return QStringLiteral("go");
-    if (suffix == "java")
-        return QStringLiteral("java");
-    if (suffix == "rs")
-        return QStringLiteral("rust");
-    return QString();  // 不支持的语言
+    // R2: 委托给 LanguageRegistry（单一数据源，消除重复映射）
+    return LanguageRegistry::instance().langIdForSuffix(suffix);
 }
 
 QString LspManager::lspLangId(const QString& langId)
 {
-    // 内部语言ID → LSP 协议 languageId
-    return langId;  // LSP languageId 与内部 langId 一致
+    // R2: 委托给 LanguageRegistry
+    return LanguageRegistry::instance().lspLanguageId(langId);
 }
 
 QString LspManager::serverCommand(const QString& langId) const
 {
+    // P3-M01 子项3: 远程 LSP 模式 — cpp/c 语言使用远程 clangd 路径
+    if (isRemoteLspMode() && (langId == "cpp" || langId == "c")) {
+        if (!m_remoteClangdPath.isEmpty()) {
+            return m_remoteClangdPath;
+        }
+        // 远程路径为空时回退到 ConfigManager 中持久化的 remoteClangdPath
+        if (!m_remoteSessionName.isEmpty()) {
+            QString persisted = ConfigManager::instance().getValue(
+                QStringLiteral("SSH/%1/remoteClangdPath").arg(m_remoteSessionName)).toString();
+            if (!persisted.isEmpty()) {
+                return persisted;
+            }
+        }
+        // 远程路径缺失 → 继续走本地检测流程（降级）
+        LOG_WARN("[LspManager] 远程 clangd 路径为空，回退本地检测");
+    }
+
     // 1. 优先从 ConfigManager 读取用户手动配置的路径
     ConfigManager& cfg = ConfigManager::instance();
     QString configured;
@@ -491,24 +557,48 @@ QString LspManager::autoDetectServer(const QString& langId)
     return QString();
 }
 
-QStringList LspManager::serverArgs(const QString& langId) const
+QStringList LspManager::serverArgs(const QString& langId, const QString& projectRoot) const
 {
     // 各语言服务器的默认启动参数
     if (langId == "cpp" || langId == "c") {
         QStringList args;
         args << QStringLiteral("--background-index");
-        // P1-1: 添加 --query-driver 允许 clangd 查询编译器系统头文件路径
-        // Windows + MinGW/Qt 工具链下，clangd 默认不知道系统头文件位置，
-        // 需要通过 query-driver 授权 clangd 调用编译器获取系统头文件路径
-        args << QStringLiteral("--query-driver=**");
-        // P1-2: 移除默认的 --clang-tidy（在未配置项目中会产生大量额外噪音诊断，
-        // 加剧"爆红"。用户可在项目根目录的 .clangd 配置文件中按需启用 clang-tidy）
+        // P0-1: --query-driver 精确指定 MinGW 编译器路径，消除 "driver clang not found in PATH" 警告
+        //       原通配符 ** 不稳定，改为检测实际编译器路径
+        // L2: detectCompilerDriver 结果缓存在 m_cachedDriverPath，避免重复读取 compile_commands.json
+        QString driverPath = detectCompilerDriver(projectRoot);
+        if (!driverPath.isEmpty()) {
+            args << QStringLiteral("--query-driver=") + driverPath;
+            LOG_INFO("[LspManager] clangd query-driver: " << driverPath.toStdString());
+        } else {
+            // 兜底：通配符（有警告但功能可用）
+            args << QStringLiteral("--query-driver=**");
+            LOG_WARN("[LspManager] 未检测到编译器路径，使用通配符 query-driver");
+        }
+        // P0-1: 移除 --pch-storage=memory（导致 15MB+ PCH 驻留内存，内存占用持续走高）
+        //       默认磁盘存储，PCH 缓存在 .cache/clangd/ 下，内存占用可控
+        // P4: --log=info 降低 clangd 自身日志冗余（默认 verbose 会刷屏 stderr）
+        args << QStringLiteral("--log=info");
+        // P0-1: 限制补全/悬停结果数量，避免超大响应阻塞主线程
+        args << QStringLiteral("--limit-results=20");
+        // P0-1: 禁用自动头文件插入（未配置项目下会误插入，干扰编码）
+        args << QStringLiteral("--header-insertion=never");
         // P0-3: 如果存在 compile_commands.json，传递编译数据库目录
-        if (!m_workspaceRoot.isEmpty()) {
-            if (QFileInfo::exists(m_workspaceRoot + QStringLiteral("/compile_commands.json"))) {
-                args << QStringLiteral("--compile-commands-dir=") + m_workspaceRoot;
-                LOG_INFO("[LspManager] 检测到 compile_commands.json，目录: "
-                          << m_workspaceRoot.toStdString());
+        // L1: 使用 projectRoot（来自 inferProjectRoot）而非 m_workspaceRoot
+        // 修复根因：用户未通过"打开文件夹"设置 m_workspaceRoot 时，仍能找到 compile_commands.json
+        if (!projectRoot.isEmpty()) {
+            const QString rootCc = projectRoot + QStringLiteral("/compile_commands.json");
+            const QString buildCc = projectRoot + QStringLiteral("/build/compile_commands.json");
+            if (QFileInfo::exists(rootCc)) {
+                args << QStringLiteral("--compile-commands-dir=") + projectRoot;
+                LOG_INFO("[LspManager] 检测到 compile_commands.json (root): "
+                          << projectRoot.toStdString());
+            } else if (QFileInfo::exists(buildCc)) {
+                args << QStringLiteral("--compile-commands-dir=") + projectRoot + QStringLiteral("/build");
+                LOG_INFO("[LspManager] 检测到 compile_commands.json (build/): "
+                          << (projectRoot + "/build").toStdString());
+            } else {
+                LOG_INFO("[LspManager] 未找到 compile_commands.json，clangd 将使用降级 fallback 解析");
             }
         }
         return args;
@@ -518,6 +608,75 @@ QStringList LspManager::serverArgs(const QString& langId) const
     if (langId == "javascript" || langId == "typescript")
         return QStringList{ QStringLiteral("--stdio") };
     return QStringList{};
+}
+
+/// L2: 检测 MinGW 编译器路径，用于 clangd --query-driver
+/// 优先级：compile_commands.json 中的编译器 > Qt Tools MinGW > 系统 PATH
+/// L1: projectRoot 用于查找 compile_commands.json（不依赖 m_workspaceRoot）
+/// L2: 结果缓存在 m_cachedDriverPath，避免每次 serverArgs 都重新读取 compile_commands.json
+QString LspManager::detectCompilerDriver(const QString& projectRoot) const
+{
+    // L2: 缓存命中 — 避免每次启动都重新读取 compile_commands.json 和遍历候选路径
+    if (!m_cachedDriverPath.isEmpty()) {
+        return m_cachedDriverPath;
+    }
+
+    // 1. 从 compile_commands.json 提取编译器路径（最准确）
+    // L1: 使用 projectRoot 而非 m_workspaceRoot
+    if (!projectRoot.isEmpty()) {
+        const QString buildCc = projectRoot + QStringLiteral("/build/compile_commands.json");
+        const QString rootCc = projectRoot + QStringLiteral("/compile_commands.json");
+        for (const QString& ccPath : {buildCc, rootCc}) {
+            if (QFileInfo::exists(ccPath)) {
+                QFile f(ccPath);
+                if (f.open(QIODevice::ReadOnly)) {
+                    QJsonParseError err;
+                    QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &err);
+                    if (err.error == QJsonParseError::NoError && doc.isArray()) {
+                        QJsonArray arr = doc.array();
+                        if (!arr.isEmpty()) {
+                            QString cmd = arr.at(0).toObject().value("command").toString();
+                            // command 格式: "F:/path/to/g++.exe  -std=c++17 ..."
+                            int spaceIdx = cmd.indexOf(' ');
+                            QString compiler = (spaceIdx > 0) ? cmd.left(spaceIdx) : cmd;
+                            compiler = compiler.replace('\\', '/').trimmed();
+                            // 去除可能的引号
+                            if (compiler.startsWith('"') && compiler.endsWith('"'))
+                                compiler = compiler.mid(1, compiler.length() - 2);
+                            if (QFileInfo::exists(compiler)) {
+                                m_cachedDriverPath = compiler;  // L2: 缓存结果
+                                return compiler;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. 检测 Qt Tools 下的 MinGW（常见安装路径）
+    static const QStringList kMingwCandidates = {
+        QStringLiteral("F:/IDE.2/QT/Tools/mingw1120_64/bin/g++.exe"),
+        QStringLiteral("F:/IDE.2/QT/Tools/mingw900_64/bin/g++.exe"),
+        QStringLiteral("F:/IDE.2/QT/Tools/mingw810_64/bin/g++.exe"),
+        QStringLiteral("C:/Qt/Tools/mingw1120_64/bin/g++.exe"),
+        QStringLiteral("C:/Qt/Tools/mingw900_64/bin/g++.exe"),
+    };
+    for (const QString& path : kMingwCandidates) {
+        if (QFileInfo::exists(path)) {
+            m_cachedDriverPath = path;  // L2: 缓存结果
+            return path;
+        }
+    }
+
+    // 3. 从 PATH 查找 g++
+    QString pathGpp = QStandardPaths::findExecutable(QStringLiteral("g++"));
+    if (!pathGpp.isEmpty()) {
+        m_cachedDriverPath = pathGpp;  // L2: 缓存结果
+        return pathGpp;
+    }
+
+    return QString();
 }
 
 QString LspManager::filePathToUri(const QString& filePath)
@@ -534,6 +693,38 @@ void LspManager::setWorkspaceRoot(const QString& rootPath)
 {
     m_workspaceRoot = rootPath;
     LOG_INFO("[LspManager] 工作区根目录已设置: " << rootPath.toStdString());
+}
+
+// ============================================================
+// P3-M01 子项3: 远程 LSP 模式
+// ============================================================
+
+void LspManager::setRemoteLspMode(const QString& sessionName, const QString& remoteClangdPath,
+                                  ISshClient* sshClient)
+{
+    m_remoteSessionName = sessionName;
+    m_remoteClangdPath = remoteClangdPath;
+    m_remoteSshClient = sshClient;
+
+    // 远程模式下清空本地 clangd 检测缓存，强制下次 serverCommand 走远程路径
+    m_detectedCache.remove(QStringLiteral("cpp"));
+    m_detectedCache.remove(QStringLiteral("c"));
+
+    LOG_INFO("[LspManager] 远程 LSP 模式已启用: session=" << sessionName.toStdString()
+             << " clangd=" << remoteClangdPath.toStdString()
+             << " sshClient=" << (sshClient ? "yes" : "no"));
+}
+
+void LspManager::clearRemoteLspMode()
+{
+    LOG_INFO("[LspManager] 远程 LSP 模式已退出");
+    m_remoteSessionName.clear();
+    m_remoteClangdPath.clear();
+    m_remoteSshClient = nullptr;
+
+    // 清空本地检测缓存，使后续 openFile 重新走本地路径检测
+    m_detectedCache.remove(QStringLiteral("cpp"));
+    m_detectedCache.remove(QStringLiteral("c"));
 }
 
 QString LspManager::inferProjectRoot(const QString& filePath, const QString& workspaceRoot)
@@ -575,20 +766,22 @@ QString LspManager::inferProjectRoot(const QString& filePath, const QString& wor
 
 void LspManager::onCompletionsReady(const QList<LspCompletionItem>& items)
 {
-    // 补全响应 → 使用 m_currentRequestFile 路由
-    emit completionsReady(m_currentRequestFile, items);
+    // P0 C01: 使用独立的补全文件路径，不再共享 m_currentRequestFile
+    emit completionsReady(m_currentCompletionFile, items);
 }
 
 void LspManager::onDefinitionReady(const QString& uri, int line, int col)
 {
     // 跳转定义响应 → 目标 URI 可能是另一个文件
+    // P0 C01: 使用独立的定义文件路径
     QString filePath = m_uriToFilePath.value(uri, uriToFilePath(uri));
-    emit definitionReady(m_currentRequestFile, uri, line, col);
+    emit definitionReady(m_currentDefinitionFile, uri, line, col);
 }
 
 void LspManager::onHoverReady(const QString& documentation, const QPoint& pos)
 {
-    emit hoverReady(m_currentRequestFile, documentation);
+    // F4: 使用独立的 hover 文件路径，不与 completion 等请求共享
+    emit hoverReady(m_currentHoverFile, documentation);
 }
 
 void LspManager::onDiagnosticsReady(const QString& uri, const QList<LspDiagnostic>& diagnostics)
@@ -601,19 +794,95 @@ void LspManager::onDiagnosticsReady(const QString& uri, const QList<LspDiagnosti
     emit diagnosticsReady(filePath, diagnostics);
 }
 
-void LspManager::onSymbolsReady(const QList<QVariantMap>& symbols)
+void LspManager::onSymbolsReady(const QString& uri, const QList<QVariantMap>& symbols)
 {
-    emit symbolsReady(m_currentRequestFile, symbols);
+    // V2.1 C1 修复：按 requestId 精确路由的 uri 反查文件路径，
+    // 不再依赖 m_currentRequestFile（会被 completion/definition 等请求覆盖）
+    QString filePath = m_uriToFilePath.value(uri);
+    if (filePath.isEmpty()) {
+        filePath = uriToFilePath(uri);
+    }
+    emit symbolsReady(filePath, symbols);
 }
 
 void LspManager::onReferencesReady(const QList<QVariantMap>& references)
 {
-    emit referencesReady(m_currentRequestFile, references);
+    // P0 C01: 使用独立的引用文件路径
+    emit referencesReady(m_currentReferencesFile, references);
 }
 
 void LspManager::onServerError(const QString& error)
 {
-    emit serverError(m_currentRequestFile, error);
+    // P0 C01: 服务器错误无法确定具体文件，使用最近的请求文件兜底
+    emit serverError(m_currentCompletionFile.isEmpty() ? m_currentDefinitionFile : m_currentCompletionFile, error);
+}
+
+void LspManager::onServerStopped(const QString& langId)
+{
+    // P0-2: clangd 崩溃/异常退出时自动重连
+    if (m_shuttingDown) {
+        LOG_INFO("[LspManager] 正在关闭，不自动重连 (langId=" << langId.toStdString() << ")");
+        return;
+    }
+
+    // P1-3: 服务器停止 → 状态变为 Disconnected（高亮器启用启发式兜底）
+    emit lspStateChanged(langId, LspHighlightState::Disconnected);
+
+    // 指数退避：第1次 2s，第2次 4s，第3次 8s，最多 30s
+    int& restartCount = m_restartCount[langId];
+    int delayMs = qMin(2000 * (1 << restartCount), 30000);
+    restartCount++;
+
+    LOG_WARN("[LspManager] LSP 服务器异常停止 (langId=" << langId.toStdString()
+             << ")，" << delayMs << "ms 后自动重连（第 " << restartCount << " 次）");
+
+    // 延迟重启
+    QTimer::singleShot(delayMs, this, [this, langId]() {
+        restartServer(langId);
+    });
+}
+
+void LspManager::restartServer(const QString& langId)
+{
+    LOG_INFO("[LspManager] 正在重启 LSP 服务器 (langId=" << langId.toStdString() << ")");
+
+    // 移除旧客户端（已停止）
+    auto it = m_clients.find(langId);
+    if (it != m_clients.end()) {
+        delete it.value();
+        m_clients.erase(it);
+    }
+
+    // 重新收集该语言的所有打开文件
+    QStringList filesToReopen;
+    for (auto fit = m_fileToLangId.begin(); fit != m_fileToLangId.end(); ++fit) {
+        if (fit.value() == langId) {
+            filesToReopen.append(fit.key());
+        }
+    }
+
+    // 清理 URI 映射中属于该语言的条目
+    for (auto uit = m_uriToFilePath.begin(); uit != m_uriToFilePath.end(); ) {
+        if (m_fileToLangId.value(uit.value()) == langId) {
+            uit = m_uriToFilePath.erase(uit);
+        } else {
+            ++uit;
+        }
+    }
+
+    // 重新打开所有文件（触发 getOrCreateClient → startServer → didOpen）
+    for (const QString& filePath : filesToReopen) {
+        m_fileToLangId.remove(filePath);  // 先移除，openFile 会重新添加
+        // 从磁盘读取内容（若编辑器有未保存内容，Widget 层会通过 documentChanged 同步）
+        QFile f(filePath);
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QString content = QString::fromUtf8(f.readAll());
+            openFile(filePath, content);
+        }
+    }
+
+    LOG_INFO("[LspManager] LSP 服务器重启完成，重新打开 " << filesToReopen.size()
+             << " 个文件 (langId=" << langId.toStdString() << ")");
 }
 
 void LspManager::onClientInitialized()
@@ -631,6 +900,11 @@ void LspManager::onClientInitialized()
         }
     }
     if (langId.isEmpty()) return;
+
+    // P1-3: 握手完成 → 状态变为 Ready（高亮器禁用启发式兜底，使用语义高亮）
+    // 重启计数清零
+    m_restartCount.remove(langId);
+    emit lspStateChanged(langId, LspHighlightState::Ready);
 
     // flush 该语言缓存的 didOpen（握手前缓存的，现在握手完成可安全发送）
     auto pendIt = m_pendingOpens.find(langId);

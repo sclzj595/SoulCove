@@ -2,6 +2,8 @@
 #define ITABWIDGET_H
 
 #include <QString>
+#include <QList>
+#include <QPair>
 
 class IEditorEdit;
 
@@ -39,6 +41,11 @@ public:
 
     /// 设置当前标签页文件路径
     virtual void setCurrentFilePath(const QString& path) = 0;
+
+    /// R3: 获取所有已打开标签页的 (filePath, editor) 列表
+    /// 用于 LspCoordinator 遍历编辑器进行状态路由，消除 dynamic_cast 向下转型
+    /// @return (文件路径, 编辑器接口) 列表，特殊标签页（无文件）的路径为空
+    virtual QList<QPair<QString, IEditorEdit*>> allEditors() const = 0;
 };
 
 #endif // ITABWIDGET_H

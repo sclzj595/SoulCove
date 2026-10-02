@@ -1,4 +1,5 @@
 #include "ui/terminal/TerminalView.h"
+#include "core/config/ThemeManager.h"
 
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -10,6 +11,8 @@
 #include <QApplication>  // P1-2: 剪贴板操作
 #include <QClipboard>    // P1-2: 剪贴板
 #include <QDateTime>     // P1-2: 点击时间追踪
+#include <QList>
+#include <algorithm>     // P2-H01: std::sort for shell pattern matching
 
 // 可执行文件扩展名列表（ls/dir 输出中高亮为绿色）
 const QStringList TerminalView::s_executableExtensions = {
@@ -490,6 +493,9 @@ void TerminalView::parseAnsiData(const QByteArray& data)
                 m_lastPrompt = text.trimmed();
             }
 
+            // P2-H01: 记录插入起始位置（供 shell 模式高亮定位文档范围）
+            int shellHighlightStart = cursor.position();
+
             // === 可执行文件颜色高亮（ls/dir 输出中的 .exe/.dll 等）===
             cursor.setCharFormat(m_currentFormat);
             QColor fgColor = m_currentFormat.foreground().color();
@@ -525,6 +531,10 @@ void TerminalView::parseAnsiData(const QByteArray& data)
                 // ANSI 已设置自定义颜色，直接插入不做额外处理
                 cursor.insertText(text);
             }
+
+            // === P2-H01: Shell 模式高亮（错误/警告/成功/信息/路径着色）===
+            // 在文本插入后追加着色，不破坏 ANSI 已有着色与可执行文件高亮
+            highlightShellPatterns(text, shellHighlightStart);
         }
     }
 
@@ -665,4 +675,110 @@ bool TerminalView::isExecutableFile(const QString& text) const
         }
     }
     return false;
+}
+
+// ============================================================
+// P2-H01: Shell 模式高亮（错误/警告/成功/信息/路径着色）
+// 在 ANSI 解析插入文本后调用，对刚插入的文本范围应用模式匹配着色
+// 设计要点：
+//   - 不破坏 ANSI 已有着色（仅对默认前景色的文本应用高亮）
+//   - 不破坏可执行文件高亮（检查文档中已有颜色，有则跳过）
+//   - 颜色从 ThemeManager::currentPalette() 获取，跟随主题
+// ============================================================
+
+void TerminalView::highlightShellPatterns(const QString& text, int startPos)
+{
+    if (text.isEmpty()) return;
+
+    // 检查基础 ANSI 格式是否有自定义前景色 — 若有则整段跳过（保留 ANSI 着色）
+    QTextCursor checkCursor(document());
+    if (startPos < document()->characterCount()) {
+        checkCursor.setPosition(startPos + 1);
+        QTextCharFormat baseFmt = checkCursor.charFormat();
+        QColor baseFg = baseFmt.foreground().color();
+        bool hasAnsiColor = baseFg.isValid()
+            && baseFg != QColor(Qt::white)
+            && baseFg != QColor(204, 204, 204);
+        if (hasAnsiColor) return;
+    }
+
+    // 从主题获取配色（跟随主题热切换）
+    const auto& palette = ThemeManager::instance().currentPalette();
+    QColor errorColor   = palette.errorColor;
+    QColor warningColor = palette.warningColor;
+    QColor successColor = QColor(120, 220, 120);   // 绿色（成功）
+    QColor infoColor    = QColor(120, 200, 220);   // 青色（信息）
+    QColor promptColor  = palette.fgSecondary;      // 灰色（命令提示符）
+    QColor pathColor    = palette.accentPrimary;    // 蓝色（文件路径）
+
+    // 定义 Shell 模式列表（顺序决定优先级，靠前的模式先匹配）
+    struct ShellPattern {
+        QRegularExpression regex;
+        QColor color;
+        bool underline;
+    };
+    QList<ShellPattern> patterns = {
+        { QRegularExpression(QStringLiteral("error:|Error:|ERROR:|fatal:|FAIL")),
+          errorColor, false },
+        { QRegularExpression(QStringLiteral("warning:|Warning:|WARN:|deprecated:")),
+          warningColor, false },
+        { QRegularExpression(QStringLiteral("success|succeeded|passed|\xe2\x9c\x93|done")),
+          successColor, false },  // ✓ = U+2713 (UTF-8: E2 9C 93)
+        { QRegularExpression(QStringLiteral("info:|Info:|INFO:|note:")),
+          infoColor, false },
+        { QRegularExpression(QStringLiteral("^\\s*[\\$#>]\\s"),
+          QRegularExpression::MultilineOption),
+          promptColor, false },
+        { QRegularExpression(QStringLiteral("[\\w/\\\\]+\\.\\w+")),
+          pathColor, true },
+    };
+
+    // 收集所有匹配项
+    struct Match { int pos; int len; QColor color; bool underline; };
+    QList<Match> matches;
+    for (const auto& p : patterns) {
+        auto it = p.regex.globalMatch(text);
+        while (it.hasNext()) {
+            auto m = it.next();
+            matches.append({ (int)m.capturedStart(), (int)m.capturedLength(),
+                             p.color, p.underline });
+        }
+    }
+    if (matches.isEmpty()) return;
+
+    // 按位置排序，处理重叠（保留先出现的匹配，跳过被覆盖的）
+    std::sort(matches.begin(), matches.end(),
+              [](const Match& a, const Match& b) { return a.pos < b.pos; });
+
+    // 应用高亮 — 使用 mergeCharFormat 附加到现有格式（不破坏可执行文件绿色等）
+    QTextCursor cursor(document());
+    int lastEnd = 0;
+    for (const auto& m : matches) {
+        if (m.pos < lastEnd) continue;  // 跳过重叠区域
+
+        int absStart = startPos + m.pos;
+        int absEnd   = startPos + m.pos + m.len;
+        if (absEnd > document()->characterCount()) break;  // 越界保护
+
+        cursor.setPosition(absStart);
+        cursor.setPosition(absEnd, QTextCursor::KeepAnchor);
+
+        // 检查该范围是否已有非默认前景色（如可执行文件绿色），有则跳过
+        QTextCharFormat rangeFmt = cursor.charFormat();
+        QColor rangeFg = rangeFmt.foreground().color();
+        bool hasCustomColor = rangeFg.isValid()
+            && rangeFg != QColor(Qt::white)
+            && rangeFg != QColor(204, 204, 204);
+        if (hasCustomColor) {
+            lastEnd = m.pos + m.len;
+            continue;
+        }
+
+        // 附加前景色和下划线（mergeCharFormat 不覆盖其他格式属性）
+        QTextCharFormat fmt;
+        fmt.setForeground(m.color);
+        if (m.underline) fmt.setFontUnderline(true);
+        cursor.mergeCharFormat(fmt);
+        lastEnd = m.pos + m.len;
+    }
 }

@@ -22,6 +22,10 @@ struct SshConnectionConfig {
         PublicKey       // 公钥认证
     };
     AuthMethod authMethod = Password;
+
+    // P3-M01 子项2: 远程终端持久化（tmux）
+    bool    useTmux = false;            ///< 是否启用 tmux 会话持久化
+    QString tmuxSessionName;            ///< tmux 会话名（为空时按 "scnb_<name>" 自动生成）
 };
 
 /// @brief SSH 客户端抽象接口

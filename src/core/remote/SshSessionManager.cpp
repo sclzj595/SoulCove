@@ -93,6 +93,9 @@ void SshSessionManager::saveConfig(const SshConnectionConfig& config)
     cm.setValue(prefix + QStringLiteral("authMethod"),
                 config.authMethod == SshConnectionConfig::PublicKey ? QStringLiteral("publickey") : QStringLiteral("password"));
     cm.setValue(prefix + QStringLiteral("keepaliveInterval"), config.keepaliveInterval);
+    // P3-M01 子项2: tmux 持久化字段
+    cm.setValue(prefix + QStringLiteral("useTmux"), config.useTmux);
+    cm.setValue(prefix + QStringLiteral("tmuxSessionName"), config.tmuxSessionName);
 
     // 更新连接名列表
     QStringList names = m_savedConfigs.keys();
@@ -112,6 +115,9 @@ void SshSessionManager::removeSavedConfig(const QString& name)
     cm.remove(prefix + QStringLiteral("privateKeyPath"));
     cm.remove(prefix + QStringLiteral("authMethod"));
     cm.remove(prefix + QStringLiteral("keepaliveInterval"));
+    // P3-M01 子项2: tmux 持久化字段
+    cm.remove(prefix + QStringLiteral("useTmux"));
+    cm.remove(prefix + QStringLiteral("tmuxSessionName"));
 
     // 更新连接名列表
     QStringList names = m_savedConfigs.keys();
@@ -154,6 +160,10 @@ void SshSessionManager::loadSavedConfigs()
         config.authMethod = (authStr == QStringLiteral("publickey"))
                                 ? SshConnectionConfig::PublicKey
                                 : SshConnectionConfig::Password;
+
+        // P3-M01 子项2: 加载 tmux 持久化字段
+        config.useTmux = cm.getValue(prefix + QStringLiteral("useTmux"), false).toBool();
+        config.tmuxSessionName = cm.getValue(prefix + QStringLiteral("tmuxSessionName")).toString();
 
         if (!config.host.isEmpty() && !config.username.isEmpty()) {
             m_savedConfigs[name] = config;

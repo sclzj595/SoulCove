@@ -1,8 +1,8 @@
 #include "controller/LspCoordinator.h"
 #include "core/lsp/LspManager.h"
+#include "core/lsp/LanguageRegistry.h"  // R3: 语言匹配（单一数据源）
 #include "ui/editor/TextCompleter.h"
 #include "ui/editor/MyTextEdit.h"
-#include "ui/editor/EditorTabBar.h"  // TabData 具体类型（实现细节，头文件保持纯净）
 #include "Logger.hpp"
 
 #include <QDir>
@@ -31,6 +31,10 @@ LspCoordinator::LspCoordinator(QObject* parent)
             this, &LspCoordinator::onServerError);
     connect(m_lspManager, &LspManager::serverNotAvailable,
             this, &LspCoordinator::serverNotAvailable);
+    // R3: LSP 状态变化 → Coordinator 内部路由到匹配语言的编辑器
+    // 不再转发给 Widget，消除 Widget 中的语言匹配逻辑（开闭原则）
+    connect(m_lspManager, &LspManager::lspStateChanged,
+            this, &LspCoordinator::onLspStateChanged);
 }
 
 LspCoordinator::~LspCoordinator() = default;
@@ -62,6 +66,9 @@ void LspCoordinator::requestHover(const QString& filePath, int line, int col)
 
 void LspCoordinator::requestDefinition(const QString& filePath, int line, int col)
 { m_lspManager->requestDefinition(filePath, line, col); }
+
+void LspCoordinator::requestImplementation(const QString& filePath, int line, int col)
+{ m_lspManager->requestImplementation(filePath, line, col); }
 
 void LspCoordinator::requestReferences(const QString& filePath, int line, int col)
 { m_lspManager->requestReferences(filePath, line, col); }
@@ -190,19 +197,34 @@ MyTextEdit* LspCoordinator::findEditorByPath(const QString& filePath) const
 {
     if (!m_tabBar || filePath.isEmpty()) return nullptr;
 
-    // ITabWidget 接口未暴露 tabDataAt，向下转型到 EditorTabBar 访问 TabData
-    // （协调器层允许依赖具体 UI 类型，头文件仍保持 ITabWidget 抽象）
-    EditorTabBar* tabBar = dynamic_cast<EditorTabBar*>(m_tabBar);
-    if (!tabBar) return nullptr;
-
-    int count = tabBar->tabCount();
-    for (int i = 0; i < count; ++i) {
-        const TabData* td = tabBar->tabDataAt(i);
-        if (!td || !td->editor) continue;
-        if (QDir::toNativeSeparators(td->filePath) ==
+    // R3: 使用 ITabWidget::allEditors() 接口遍历，消除 dynamic_cast 向下转型
+    for (const auto& pair : m_tabBar->allEditors()) {
+        if (QDir::toNativeSeparators(pair.first) ==
             QDir::toNativeSeparators(filePath)) {
-            return td->editor;
+            // IEditorEdit 实现类是 MyTextEdit，用 dynamic_cast 安全转换
+            return dynamic_cast<MyTextEdit*>(pair.second);
         }
     }
     return nullptr;
+}
+
+// R3: LSP 状态变化 → 遍历所有编辑器，更新匹配语言的高亮状态
+// Coordinator 内部路由，Widget 不再参与语言匹配（开闭原则）
+void LspCoordinator::onLspStateChanged(const QString& langId, LspHighlightState state)
+{
+    if (!m_tabBar) return;
+
+    // 遍历所有编辑器，通过 LanguageRegistry 匹配语言
+    for (const auto& pair : m_tabBar->allEditors()) {
+        const QString& filePath = pair.first;
+        if (filePath.isEmpty()) continue;
+
+        // R3: 使用 LanguageRegistry 单一数据源匹配语言（消除硬编码 if-else）
+        if (!LanguageRegistry::instance().matches(langId, filePath)) continue;
+
+        // R3: 通过 IEditorEdit 接口直接调用，无需向下转型到 MyTextEdit
+        if (pair.second) {
+            pair.second->setLspHighlightState(state);
+        }
+    }
 }

@@ -52,6 +52,9 @@ public:
     QByteArray readFile(const QString& remotePath, qint64 maxSize = 10 * 1024 * 1024) override;
     bool writeFile(const QString& remotePath, const QByteArray& data) override;
 
+    // P3-M01 子项1: 获取远程文件 mtime（用于缓存一致性校验）
+    QDateTime fileMtime(const QString& remotePath);
+
 private:
     SshClient* m_sshClient = nullptr;
     LIBSSH2_SFTP* m_sftp = nullptr;

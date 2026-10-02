@@ -180,6 +180,46 @@ private:
     QFile m_logFile;                        // 日志文件句柄
     mutable QTextStream m_fileStream;       // 文件流（mutable 允许 const 方法写入）
     bool m_fileEnabled;                     // 文件日志开关
+
+public:
+    // ========== Qt 消息过滤器 ==========
+
+    /// 安装 Qt 全局消息处理器，屏蔽 Windows 系统 COM/SHELL 无关警告
+    /// 过滤的已知噪音：
+    ///   - "库没有注册"（SHELL32 COM 组件未注册）
+    ///   - "尚未实现"（oleaut32 系统接口未实现）
+    ///   - SHELL32.dll / oleaut32 系统底层警告
+    /// 调用方式：在 main.cpp 的 QApplication 创建前调用 Logger::installQtMessageFilter();
+    static void installQtMessageFilter() {
+        static QtMessageHandler s_defaultHandler = nullptr;
+        s_defaultHandler = qInstallMessageHandler(
+            [](QtMsgType type, const QMessageLogContext& ctx, const QString& msg) {
+                // 仅过滤 Warning 级别的系统噪音（Debug/Info/Critical 正常放行）
+                if (type == QtWarningMsg) {
+                    // 已知的 Windows COM/SHELL 系统警告关键词（中英文）
+                    static const QStringList kSystemNoisePatterns = {
+                        QStringLiteral("库没有注册"),
+                        QStringLiteral("尚未实现"),
+                        QStringLiteral("SHELL32"),
+                        QStringLiteral("oleaut32"),
+                        QStringLiteral("Not implemented"),
+                        QStringLiteral("Library not registered"),
+                        QStringLiteral("操作无法使用"),
+                        QStringLiteral("CoCreateInstance")
+                    };
+                    for (const QString& pattern : kSystemNoisePatterns) {
+                        if (msg.contains(pattern, Qt::CaseInsensitive)) {
+                            return;  // 静默丢弃系统噪音
+                        }
+                    }
+                }
+                // 非系统噪音 → 交给默认处理器输出
+                if (s_defaultHandler) {
+                    s_defaultHandler(type, ctx, msg);
+                }
+            }
+        );
+    }
 };
 
 #endif // CLIENT_LOGGER_HPP

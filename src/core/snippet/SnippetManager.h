@@ -45,7 +45,22 @@ public:
 
     /// @brief 展开 snippet: 将 $1 $2 占位符替换为可跳转光标位置标记
     /// 返回展开后的文本，同时记录占位符位置供编辑器使用
-    QString expandSnippet(const CodeSnippet& snippet);
+    /// @param snippet  要展开的片段
+    /// @param selection  当前编辑器选中文本，用于替换 $SELECTION 变量（为空则替换为空串）
+    QString expandSnippet(const CodeSnippet& snippet, const QString& selection = QString());
+
+    // === VSCode 格式兼容（P2-H02 子项3）===
+    /// @brief 从 VSCode snippet JSON 文件导入片段
+    /// VSCode 格式: { "name": { "prefix","body":[...],"description" } }
+    /// @param filePath  VSCode snippet JSON 文件路径
+    /// @param language  指定导入片段的语言，为空则使用 "all"
+    /// @return 导入成功返回 true
+    bool importFromVscodeJson(const QString& filePath, const QString& language = QString());
+    /// @brief 导出片段为 VSCode snippet JSON 格式
+    /// @param filePath  目标文件路径
+    /// @param language  仅导出指定语言的片段，为空则导出全部
+    /// @return 导出成功返回 true
+    bool exportToVscodeJson(const QString& filePath, const QString& language = QString()) const;
 
     // === 持久化 ===
     void saveToFile();

@@ -3,11 +3,14 @@
 #include "core/remote/SshSessionManager.h"
 #include "core/config/ThemeManager.h"
 #include "core/config/ConfigManager.h"
+#include "ui/dialog/ModernDialog.h"
+#include "Logger.hpp"
 
 #include <QScrollBar>
 #include <QShowEvent>
 #include <QResizeEvent>
 #include <QFont>
+#include <QRegularExpression>
 
 // ============================================================
 // 构造 / 析构
@@ -217,11 +220,127 @@ bool SshTerminalWidget::connectToHost(const SshConnectionConfig& config)
         palette.accentPrimary
     );
 
+    // P3-M01 子项2: tmux 会话持久化
+    // 启用条件：用户在配置中勾选 useTmux，或未勾选但远程有 tmux 时提示用户
+    bool useTmux = config.useTmux;
+    QString tmuxName = config.tmuxSessionName;
+    if (tmuxName.isEmpty() && !config.name.isEmpty()) {
+        tmuxName = QStringLiteral("scnb_%1").arg(config.name);
+    }
+
+    QString tmuxPath = detectTmux(client);
+    if (tmuxPath.isEmpty()) {
+        // 远程未安装 tmux：跳过持久化
+        if (useTmux) {
+            session.view->showWelcome(
+                tr("[tmux] 远程主机未安装 tmux，会话持久化不可用\n"),
+                palette.fgSecondary);
+            LOG_WARN("[SshTerminalWidget] 远程未安装 tmux，跳过持久化: " << config.name.toStdString());
+        }
+    } else {
+        // 远程已安装 tmux
+        if (!useTmux) {
+            // 用户尚未启用 → 提示是否启用
+            int ret = ModernDialog::question(
+                this, tr("终端持久化"),
+                tr("远程主机已安装 tmux。\n是否启用会话持久化？\n\n"
+                   "启用后，断开重连时可恢复上次的终端会话。"));
+            useTmux = (ret == ModernDialog::ROLE_ACCEPT);
+        }
+        if (useTmux) {
+            // 尝试 attach 已有会话，不存在则 new
+            // 通过 SSH 执行 `tmux has-session -t <name>` 判断会话是否存在
+            QString checkCmd = QStringLiteral("tmux has-session -t '%1' 2>/dev/null && echo SCNB_TMUX_EXISTS").arg(tmuxName);
+            QString checkResult = client->executeCommand(checkCmd, 3000);
+            if (checkResult.contains(QStringLiteral("SCNB_TMUX_EXISTS"))) {
+                // 会话已存在 → attach
+                attachTmuxSession(tmuxName);
+                session.view->showWelcome(
+                    tr("[tmux] 已附加到会话: %1\n").arg(tmuxName),
+                    palette.accentPrimary);
+            } else {
+                // 会话不存在 → new
+                startTmuxSession(tmuxName);
+                session.view->showWelcome(
+                    tr("[tmux] 已新建会话: %1\n").arg(tmuxName),
+                    palette.accentPrimary);
+            }
+            // 记录到会话结构（写回 m_sessions）
+            // 注意：此时 m_sessions[index] 已插入，需同步状态
+            m_sessions[index].useTmux = true;
+            m_sessions[index].tmuxSessionName = tmuxName;
+            LOG_INFO("[SshTerminalWidget] tmux 持久化已启用: " << tmuxName.toStdString());
+
+            // 回写到会话配置（持久化用户选择）
+            SshConnectionConfig updated = config;
+            updated.useTmux = true;
+            updated.tmuxSessionName = tmuxName;
+            SshSessionManager::instance().saveConfig(updated);
+        }
+    }
+
     m_statusLabel->setText(tr("已连接: %1").arg(session.displayName));
     applyTheme();
     updateEmptyHint();
 
     return true;
+}
+
+// ============================================================
+// P3-M01 子项2: 远程终端持久化（tmux）
+// ============================================================
+
+QString SshTerminalWidget::detectTmux(SshClient* client) const
+{
+    if (!client || !client->isConnected()) return QString();
+    // 执行 `which tmux` 检测，返回值首行去除换行
+    QString out = client->executeCommand(QStringLiteral("which tmux 2>/dev/null"), 3000);
+    out = out.trimmed();
+    // 兜底：某些系统 which 无输出时尝试 command -v
+    if (out.isEmpty() || out.contains(QStringLiteral("no tmux"), Qt::CaseInsensitive)) {
+        out = client->executeCommand(QStringLiteral("command -v tmux 2>/dev/null"), 3000).trimmed();
+    }
+    // 校验：路径不为空且不包含错误信息
+    if (!out.isEmpty() && !out.contains(QStringLiteral("not found"), Qt::CaseInsensitive)) {
+        LOG_INFO("[SshTerminalWidget] 检测到 tmux: " << out.toStdString());
+        return out;
+    }
+    return QString();
+}
+
+void SshTerminalWidget::attachTmuxSession(const QString& sessionName)
+{
+    if (sessionName.isEmpty()) {
+        LOG_WARN("[SshTerminalWidget] attachTmuxSession: sessionName 为空");
+        return;
+    }
+    int idx = m_tabBar->currentIndex();
+    if (idx < 0 || idx >= m_sessions.size()) return;
+    const auto& session = m_sessions[idx];
+    if (!session.client || session.shellChannelId < 0) return;
+
+    // 向 Shell 通道发送 `tmux attach -t <name>` 命令
+    // 使用 -d 选项：detach 其他客户端，避免冲突
+    QString cmd = QStringLiteral("tmux attach -d -t '%1'\r\n").arg(sessionName);
+    session.client->writeShell(session.shellChannelId, cmd.toUtf8());
+    LOG_INFO("[SshTerminalWidget] 已发送 tmux attach 命令: " << sessionName.toStdString());
+}
+
+void SshTerminalWidget::startTmuxSession(const QString& sessionName)
+{
+    if (sessionName.isEmpty()) {
+        LOG_WARN("[SshTerminalWidget] startTmuxSession: sessionName 为空");
+        return;
+    }
+    int idx = m_tabBar->currentIndex();
+    if (idx < 0 || idx >= m_sessions.size()) return;
+    const auto& session = m_sessions[idx];
+    if (!session.client || session.shellChannelId < 0) return;
+
+    // 向 Shell 通道发送 `tmux new -s <name>` 命令
+    QString cmd = QStringLiteral("tmux new -s '%1'\r\n").arg(sessionName);
+    session.client->writeShell(session.shellChannelId, cmd.toUtf8());
+    LOG_INFO("[SshTerminalWidget] 已发送 tmux new 命令: " << sessionName.toStdString());
 }
 
 void SshTerminalWidget::closeTab(int index)

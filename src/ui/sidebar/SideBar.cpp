@@ -1,7 +1,6 @@
 #include "ui/sidebar/SideBar.h"
 #include "Logger.hpp"
 #include "ui/sidebar/GitPanel.h"
-#include "ui/sidebar/OutlinePanel.h"  // V1.9: 大纲面板（已抽出）
 #include "ui/sidebar/TasksPanel.h"    // M15: 任务面板（已抽出）
 #include "ui/sidebar/SearchPanel.h"   // 搜索面板（已抽出）
 #include "ui/sidebar/ExplorerPanel.h" // 资源管理器面板（已抽出）
@@ -43,8 +42,6 @@ SideBar::SideBar(QWidget* parent)
     m_btnSearch     = createActivityBtn(QString::fromUtf8("\xF0\x9F\x94\x8D"), Activity::Search,     tr("搜索"));         // 🔍
     m_btnGit        = createActivityBtn(QString::fromUtf8("\xE2\x9C\x8D"), Activity::Git,        tr("源代码管理"));    // ✍
     m_btnTasks     = createActivityBtn(QString::fromUtf8("\xE2\x9A\x92"), Activity::Tasks,      tr("任务"));          // ⚙ (任务图标)
-    m_btnOutline   = createActivityBtn(QString::fromUtf8("\xE2\x99\xA0"), Activity::Outline,    tr("大纲"));          // ♠ (大纲图标，类似 VSCode 的横线图标)
-    m_btnExtensions = createActivityBtn(QString::fromUtf8("\xE2\xAC\xA2"), Activity::Extensions, tr("扩展"));          // ⬢
 
     // 终端按钮（独立动作按钮，不切换面板，直接触发信号）
     m_btnTerminal = new QPushButton(QString::fromUtf8("\xE2\x96\xBA"), m_activityBar);  // ▶ (终端图标)
@@ -62,8 +59,6 @@ SideBar::SideBar(QWidget* parent)
     m_activityLayout->addWidget(m_btnSearch);
     m_activityLayout->addWidget(m_btnGit);
     m_activityLayout->addWidget(m_btnTasks);       // M15: 任务按钮
-    m_activityLayout->addWidget(m_btnOutline);     // V1.9: 大纲按钮
-    m_activityLayout->addWidget(m_btnExtensions);
     m_activityLayout->addWidget(m_btnTerminal);
     m_activityLayout->addStretch();
 
@@ -99,6 +94,9 @@ SideBar::SideBar(QWidget* parent)
             this, &SideBar::removeWorkspaceFolder);
     connect(m_explorerPanel, &ExplorerPanel::openFolderClicked,
             this, &SideBar::onExplorerOpenFolderClicked);
+    // V2.1: 转发 ExplorerPanel 内嵌大纲的符号点击信号（供 Widget 跳转）
+    connect(m_explorerPanel, &ExplorerPanel::outlineSymbolClicked,
+            this, &SideBar::outlineSymbolClicked);
     m_panelStack->addWidget(m_explorerPanel);
 
     // --- Search 面板（已抽出为 SearchPanel）---
@@ -109,7 +107,8 @@ SideBar::SideBar(QWidget* parent)
     connect(m_searchPanel, &SearchPanel::locateRequested,
             this, [this](const QString& filePath, int line, int col) {
         // 搜索结果的定位复用 outlineSymbolClicked 信号（Widget 层已连接跳转逻辑）
-        emit outlineSymbolClicked(filePath, line, col);
+        // V2.1: 搜索结果无结束位置，传 -1 表示仅定位不选中块
+        emit outlineSymbolClicked(filePath, line, col, -1, -1);
     });
     m_panelStack->addWidget(m_searchPanel);
 
@@ -127,33 +126,6 @@ SideBar::SideBar(QWidget* parent)
     // --- Tasks 面板（M15: 任务系统，已抽出为 TasksPanel）---
     m_tasksPanel = new TasksPanel(this);
     m_panelStack->addWidget(m_tasksPanel);
-
-    // --- Extensions 面板 ---
-    m_extensionsPanel = new QWidget();
-    auto* extLayout = new QVBoxLayout(m_extensionsPanel);
-    extLayout->setContentsMargins(8, 8, 4, 4);
-    extLayout->setSpacing(4);
-
-    auto* extTitle = new QLabel(tr("扩展"), m_extensionsPanel);
-    extTitle->setObjectName(QStringLiteral("panelTitle"));
-    extLayout->addWidget(extTitle);
-
-    auto* extHint = new QLabel(tr("暂无已安装扩展\n\n未来可集成：\n• 终端 (Terminal)\n• Git 集成\n• 代码片段"), m_extensionsPanel);
-    extHint->setObjectName(QStringLiteral("settingsHint"));
-    extHint->setWordWrap(true);
-    extLayout->addWidget(extHint);
-    extLayout->addStretch();
-
-    m_panelStack->addWidget(m_extensionsPanel);
-
-    // --- Outline 面板（V1.9: 大纲/符号导航，已抽出为 OutlinePanel）---
-    m_outlinePanel = new OutlinePanel(this);
-    // 转发面板的符号点击信号为 SideBar 的 outlineSymbolClicked 信号
-    connect(m_outlinePanel, &OutlinePanel::symbolClicked,
-            this, [this](const QString& filePath, int line, int col) {
-        emit outlineSymbolClicked(filePath, line, col);
-    });
-    m_panelStack->addWidget(m_outlinePanel);
 
     panelOuterLayout->addWidget(m_panelStack);
 
@@ -193,7 +165,7 @@ void SideBar::switchToActivity(Activity activity)
 {
     m_currentActivity = activity;
 
-    for (auto* btn : {m_btnExplorer, m_btnSearch, m_btnGit, m_btnTasks, m_btnOutline, m_btnExtensions}) {
+    for (auto* btn : {m_btnExplorer, m_btnSearch, m_btnGit, m_btnTasks}) {
         bool isTarget = (btn->property("activity").toInt() == static_cast<int>(activity));
         btn->setChecked(isTarget);
         btn->setProperty("active", isTarget);
@@ -207,8 +179,6 @@ void SideBar::switchToActivity(Activity activity)
     case Activity::Search:     m_panelStack->setCurrentWidget(m_searchPanel);     break;
     case Activity::Git:        m_panelStack->setCurrentWidget(m_gitPanel);        break;
     case Activity::Tasks:     m_panelStack->setCurrentWidget(m_tasksPanel);      break;
-    case Activity::Outline:   m_panelStack->setCurrentWidget(m_outlinePanel);    break;
-    case Activity::Extensions: m_panelStack->setCurrentWidget(m_extensionsPanel); break;
     }
 }
 
@@ -287,6 +257,49 @@ void SideBar::clearWorkspace()
     emit workspaceFoldersChanged(m_workspaceFolders);
 }
 
+// ============================================================
+// P2-H04: 多文件夹工作区切换/移除（按路径操作）
+// ============================================================
+
+void SideBar::setWorkspaceFolders(const QStringList& folders)
+{
+    // 切换工作区：清空并重建文件树（去重 + 规范化路径）
+    m_workspaceFolders.clear();
+    for (const QString& f : folders) {
+        if (f.isEmpty()) continue;
+        QString abs = QDir(f).absolutePath();
+        if (!m_workspaceFolders.contains(abs)) {
+            m_workspaceFolders.append(abs);
+        }
+    }
+    // 兼容 m_workDir（保持为第一个文件夹）
+    m_workDir = m_workspaceFolders.isEmpty() ? QString() : m_workspaceFolders.first();
+    if (m_tasksPanel) m_tasksPanel->setWorkDirectory(m_workDir);
+    if (m_searchPanel) m_searchPanel->setWorkspaceFolders(m_workspaceFolders);
+    // ExplorerPanel::setWorkspaceFolders 内部会调用 refreshFileList 重建文件树
+    if (m_explorerPanel) m_explorerPanel->setWorkspaceFolders(m_workspaceFolders);
+    emit workspaceFoldersChanged(m_workspaceFolders);
+    LOG_DEBUG("[SideBar] 工作区已切换，共 " << m_workspaceFolders.size() << " 个文件夹");
+}
+
+bool SideBar::removeWorkspaceFolderByPath(const QString& folder)
+{
+    if (folder.isEmpty()) return false;
+    QString abs = QDir(folder).absolutePath();
+    if (!m_workspaceFolders.contains(abs)) {
+        return false;
+    }
+    m_workspaceFolders.removeAll(abs);
+    // 更新 m_workDir
+    m_workDir = m_workspaceFolders.isEmpty() ? QString() : m_workspaceFolders.first();
+    if (m_tasksPanel) m_tasksPanel->setWorkDirectory(m_workDir);
+    if (m_searchPanel) m_searchPanel->setWorkspaceFolders(m_workspaceFolders);
+    if (m_explorerPanel) m_explorerPanel->setWorkspaceFolders(m_workspaceFolders);
+    emit workspaceFoldersChanged(m_workspaceFolders);
+    LOG_DEBUG("[SideBar] 从工作区移除文件夹: " << abs);
+    return true;
+}
+
 // ========== 槽函数 ==========
 
 void SideBar::onActivityButtonClicked()
@@ -328,7 +341,7 @@ void SideBar::setTerminalButtonChecked(bool checked)
 
 void SideBar::refreshActivityStyles()
 {
-    for (auto* btn : {m_btnExplorer, m_btnSearch, m_btnGit, m_btnTasks, m_btnOutline, m_btnExtensions, m_btnTerminal}) {
+    for (auto* btn : {m_btnExplorer, m_btnSearch, m_btnGit, m_btnTasks, m_btnTerminal}) {
         btn->style()->unpolish(btn);
         btn->style()->polish(btn);
         btn->update();
@@ -342,20 +355,35 @@ void SideBar::selectFileByPath(const QString& filePath)
 }
 
 // ============================================================
-// V1.9: 大纲面板（符号导航）— 委托给 OutlinePanel
+// V2.1: 大纲透传接口（委托给 ExplorerPanel 内嵌的大纲区域）
 // ============================================================
 
-void SideBar::updateOutline(const QString& filePath, const QList<QVariantMap>& symbols)
+void SideBar::updateOutlineForEditor(const QString& filePath, const QList<QVariantMap>& symbols)
 {
-    if (m_outlinePanel) m_outlinePanel->updateOutline(filePath, symbols);
-}
-
-void SideBar::clearOutline()
-{
-    if (m_outlinePanel) m_outlinePanel->clearOutline();
+    if (m_explorerPanel) m_explorerPanel->updateOutline(filePath, symbols);
 }
 
 void SideBar::updateOutlineFromText(const QString& filePath, const QString& content)
 {
-    if (m_outlinePanel) m_outlinePanel->updateOutlineFromText(filePath, content);
+    if (m_explorerPanel) m_explorerPanel->updateOutlineFromText(filePath, content);
+}
+
+void SideBar::clearOutline()
+{
+    if (m_explorerPanel) m_explorerPanel->clearOutline();
+}
+
+void SideBar::resetOutlineFilePath(const QString& filePath)
+{
+    // V2.1 C3: 透传给 ExplorerPanel，立即同步大纲文件路径
+    if (m_explorerPanel) m_explorerPanel->resetOutlineFilePath(filePath);
+}
+
+void SideBar::savePanelStates()
+{
+    // V2.1 M2/M3: 关闭时持久化 splitter 高度 + 大纲折叠状态
+    if (m_explorerPanel) {
+        m_explorerPanel->saveState();
+        m_explorerPanel->saveOutlineState();
+    }
 }

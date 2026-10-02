@@ -84,6 +84,10 @@ void ShortcutFilter::installOn(QWidget* target)
 
 void ShortcutFilter::setActiveContext(const QString& context)
 {
+    // 防抖：上下文未变化时直接返回，避免高频重复日志与无效处理
+    // （鼠标移动、点击、切换标签会频繁触发，但上下文往往未变）
+    if (m_activeContext == context) return;
+
     m_activeContext = context;
     LOG_DEBUG_S("ShortcutFilter", "setActiveContext", "活跃上下文切换为: " << context);
 }

@@ -5,6 +5,8 @@
 #include <QStringList>
 #include <QMap>
 #include <QPair>
+#include <QDir>
+#include <QSet>
 
 /// @brief 头文件符号扫描器 — 解析 #include/import 引入的本地文件，提取符号名
 ///
@@ -39,7 +41,7 @@ private:
     static QList<QPair<QString, QString>> scanJsModules(
         const QString& sourceFilePath, const QString& sourceContent);
 
-    /// 从 C/C++ 文件内容中提取符号名（class/struct/enum/function/typedef/define）
+    /// 从 C/C++ 文件内容中提取符号名（class/struct/enum/function/typedef/define/全局变量）
     static QList<QPair<QString, QString>> extractCppSymbols(const QString& content);
 
     /// 从 Python 文件内容中提取符号名（class/def）
@@ -47,6 +49,21 @@ private:
 
     /// 从 JS/TS 文件内容中提取符号名（function/class/const）
     static QList<QPair<QString, QString>> extractJsSymbols(const QString& content);
+
+    /// H2: 解析头文件路径 — 从多个候选位置查找头文件
+    /// @param sourceDir 源文件所在目录
+    /// @param includePath #include 指令中的路径
+    /// @return 找到的头文件绝对路径，未找到返回空字符串
+    static QString resolveHeaderPath(const QDir& sourceDir, const QString& includePath);
+
+    /// H2: 递归扫描头文件（传递性扫描 #include 的头文件，带深度限制和环检测）
+    /// @param headerPath 起始头文件路径
+    /// @param allSymbols 输出：累积的符号列表
+    /// @param visited 已访问文件集合（防止循环引用）
+    /// @param depth 当前递归深度（限制最大 3 层）
+    static void scanCppHeaderRecursive(const QString& headerPath,
+                                       QList<QPair<QString, QString>>& allSymbols,
+                                       QSet<QString>& visited, int depth);
 
     /// 安全读取文件内容（文件不存在时返回空字符串）
     static QString readFileContent(const QString& path);

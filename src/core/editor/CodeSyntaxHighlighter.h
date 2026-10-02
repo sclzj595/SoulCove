@@ -2,6 +2,7 @@
 #define CODESYNTAXHIGHLIGHTER_H
 
 #include "interfaces/editor/ISyntaxHighlighter.h"
+#include "core/lsp/LspTypes.h"  // R1: LspHighlightState 公共枚举（跨层共享）
 
 #include <QSyntaxHighlighter>
 #include <QTextCharFormat>
@@ -9,6 +10,7 @@
 #include <QStringList>
 #include <QMap>
 #include <QHash>
+#include <QSet>
 #include <QVariantMap>
 
 /// @brief 语义符号信息（来自 LSP documentSymbol，用于语义高亮）
@@ -58,6 +60,11 @@ public:
     /// @param symbols (符号名, 语义角色) 列表，角色与 colorForRole 一致
     void setExternalSymbols(const QList<QPair<QString, QString>>& symbols);
 
+    /// @brief P1-3: 设置 LSP 状态（双轨高亮降级）
+    /// LSP Ready 时禁用启发式兜底（避免与语义高亮冲突）
+    /// LSP Disconnected/Initializing 时启用启发式兜底（PascalCase→类型, m_→成员, ALL_CAPS→常量）
+    void setLspState(LspHighlightState state);
+
 protected:
     void highlightBlock(const QString& text) override;
 
@@ -96,13 +103,32 @@ private:
     /// L12: 根据 LSP SymbolKind 选择对应的语义高亮格式
     QTextCharFormat formatForSymbolKind(int kind) const;
 
+    /// P1-3: 初始化启发式兜底规则（PascalCase→类型, m_→成员, ALL_CAPS→常量）
+    /// 仅在 LSP 未就绪时启用，LSP Ready 时禁用避免与语义高亮冲突
+    void setupFallbackHeuristics();
+
+    /// P3/P4: 注释域细分高亮 — 在已着色的注释区间内扫描 Doxygen 标签和 TODO 标记
+    /// @param start 注释区间起始列（0-based）
+    /// @param length 注释区间长度
+    /// @param text 当前行完整文本
+    void highlightCommentInternals(int start, int length, const QString& text);
+
     QList<HighlightRule> m_rules;
     QList<HighlightRule> m_externalRules;  // 外部符号规则（来自 #include/import 的本地头文件符号）
+    QList<HighlightRule> m_fallbackRules;  // P1-3: 启发式兜底规则（LSP 断开时启用）
     QString m_currentSuffix;  // 当前语言后缀
     bool m_supportsBlockComment = false;  // 是否支持 /* */ 块注释（C/C++/JS/Go/CSS）
 
+    // P1-3: LSP 状态（控制启发式兜底的启用/禁用）
+    LspHighlightState m_lspState = LspHighlightState::NotStarted;
+
     // L12: 语义符号按行索引（行号 → 该行上的符号列表），highlightBlock 快速查找
     QHash<int, QList<SemanticSymbol>> m_symbolsByLine;
+
+    // C02-3: 外部符号增量高亮 — 记录命中行号与符号名集合
+    // setExternalSymbols 时只重高亮"旧命中行 + 含新增符号名的行"，避免全量 rehighlight
+    QSet<int> m_externalSymbolLines;       // 当前有外部符号命中的行号集合
+    QSet<QString> m_externalSymbolNames;   // 当前外部符号名集合（用于计算新增符号）
 
     // 高亮格式（颜色跟随主题）
     QTextCharFormat m_keywordFormat;      // 关键字
@@ -121,11 +147,19 @@ private:
     QTextCharFormat m_tomlKeyFormat;      // TOML键名 (M10)
     QTextCharFormat m_tomlSectionFormat;  // TOML段落头 (M10)
 
+    // P3/P4: 注释域细分高亮（Doxygen 标签 + TODO 标记）
+    QTextCharFormat m_doxyFormat;         // Doxygen 标签 (@brief/@param/@return...)
+    QTextCharFormat m_todoFormat;         // TODO/FIXME/NOTE 待办标记
+    QTextCharFormat m_headerPathFormat;   // Bug1: #include 头文件路径（链接风格，区别于字符串）
+
     // L13: 语义高亮格式（来自 LSP documentSymbol，区别于正则关键字高亮）
     QTextCharFormat m_functionDeclFormat;  // 函数声明（Function/Method/Constructor）
     QTextCharFormat m_typeDefFormat;       // 类型定义（Class/Struct/Enum/Interface/TypeParameter）
     QTextCharFormat m_memberVarFormat;     // 成员变量（Field/Property）
     QTextCharFormat m_localVarFormat;      // 局部变量（Variable）
+
+    // R5: role→color 查表（替代 if-else 链，O(1) 查找）
+    QHash<QString, QColor> m_roleColorMap;
 };
 
 #endif // CODESYNTAXHIGHLIGHTER_H

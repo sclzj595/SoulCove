@@ -139,3 +139,20 @@ bool TerminalBackend::isRunning() const
 {
     return m_process && m_process->state() == QProcess::Running;
 }
+
+// ============================================================
+// P2-H01: 引用计数（终端复用/克隆）
+// ============================================================
+
+void TerminalBackend::addRef()
+{
+    ++m_refCount;
+}
+
+void TerminalBackend::release()
+{
+    if (--m_refCount <= 0) {
+        // 引用计数归零：销毁自身（析构函数会自动调用 stop() 优雅退出进程）
+        delete this;
+    }
+}

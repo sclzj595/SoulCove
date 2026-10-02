@@ -150,6 +150,7 @@ ThemePalette ThemeManager::createPurpleDark()
     p.scrollbarHandle     = QColor("#424242");
     p.scrollbarHandleHover= QColor("#555555");
 
+    p.initSyntaxDark();
     return p;
 }
 
@@ -200,6 +201,7 @@ ThemePalette ThemeManager::createBlueDark()
     p.scrollbarHandle     = QColor("#424242");
     p.scrollbarHandleHover= QColor("#555555");
 
+    p.initSyntaxDark();
     return p;
 }
 
@@ -250,6 +252,7 @@ ThemePalette ThemeManager::createBlackDark()
     p.scrollbarHandle     = QColor("#333333");
     p.scrollbarHandleHover= QColor("#444444");
 
+    p.initSyntaxDark();
     return p;
 }
 
@@ -300,6 +303,7 @@ ThemePalette ThemeManager::createLightClassic()
     p.scrollbarHandle     = QColor("#c1c1c1");
     p.scrollbarHandleHover= QColor("#a0a0a0");
 
+    p.initSyntaxLight();
     return p;
 }
 
@@ -356,7 +360,64 @@ ThemePalette ThemeManager::createPinkLight()
     p.scrollbarHandle     = QColor("#e0b8cc");
     p.scrollbarHandleHover= QColor("#d49ab5");
 
+    p.initSyntaxLight();
     return p;
+}
+
+// ========== P1-2: 语法高亮配色初始化 ==========
+
+void ThemePalette::initSyntaxDark()
+{
+    // VSCode Dark+ 配色 — 暗色主题标准配色
+    syntax.keyword      = QColor("#569CD6"); // 蓝
+    syntax.control      = QColor("#C586C0"); // 粉紫（控制流）
+    syntax.type         = QColor("#4EC9B0"); // 青
+    syntax.string       = QColor("#CE9178"); // 橙
+    syntax.number       = QColor("#B5CEA8"); // 浅绿
+    syntax.comment      = QColor("#6A9955"); // 绿
+    syntax.function     = QColor("#DCDCAA"); // 黄
+    syntax.funcDecl     = QColor("#DCDCAA"); // 黄（函数声明，斜体）
+    syntax.preprocessor = QColor("#C586C0"); // 粉紫
+    syntax.builtin      = QColor("#DCDCAA"); // 黄
+    syntax.decorator    = QColor("#DCDCAA"); // 黄
+    syntax.constant     = QColor("#4FC1FF"); // 浅蓝
+    syntax.tag          = QColor("#569CD6"); // 蓝
+    syntax.typeDef      = QColor("#4EC9B0"); // 青（LSP 类型定义）
+    syntax.memberVar    = QColor("#9CDCFE"); // 浅蓝（LSP 成员变量）
+    syntax.localVar     = QColor("#9CDCFE"); // 浅蓝（LSP 局部变量）
+    syntax.yamlKey      = QColor("#4EC9B0"); // 青
+    syntax.tomlKey      = QColor("#9CDCFE"); // 浅蓝
+    syntax.tomlSection  = QColor("#C586C0"); // 粉紫
+    syntax.doxy         = QColor("#FFB86C"); // P3: 橙黄（Doxygen 标签，加粗）
+    syntax.todo         = QColor("#FF6B6B"); // P4: 暖红（TODO/FIXME，斜体）
+    syntax.headerPath   = QColor("#4FC1FF"); // Bug1: 浅蓝（头文件路径，链接风格，可点击跳转）
+}
+
+void ThemePalette::initSyntaxLight()
+{
+    // VSCode Light+ 配色 — 与 Dark+ 对称，保证主题切换后视觉一致
+    syntax.keyword      = QColor("#0000FF"); // 蓝
+    syntax.control      = QColor("#AF00DB"); // 紫（控制流，区别于关键字）
+    syntax.type         = QColor("#267F99"); // 青
+    syntax.string       = QColor("#A31515"); // 红
+    syntax.number       = QColor("#098658"); // 绿
+    syntax.comment      = QColor("#008000"); // 绿
+    syntax.function     = QColor("#795E26"); // 棕
+    syntax.funcDecl     = QColor("#795E26"); // 棕（函数声明，斜体）
+    syntax.preprocessor = QColor("#AF00DB"); // 紫
+    syntax.builtin      = QColor("#795E26"); // 棕
+    syntax.decorator    = QColor("#795E26"); // 棕
+    syntax.constant     = QColor("#0070C1"); // 蓝
+    syntax.tag          = QColor("#800000"); // 褐红
+    syntax.typeDef      = QColor("#267F99"); // 青（LSP 类型定义）
+    syntax.memberVar    = QColor("#001080"); // 深蓝（LSP 成员变量）
+    syntax.localVar     = QColor("#001080"); // 深蓝（LSP 局部变量）
+    syntax.yamlKey      = QColor("#267F99"); // 青
+    syntax.tomlKey      = QColor("#001080"); // 深蓝
+    syntax.tomlSection  = QColor("#AF00DB"); // 紫
+    syntax.doxy         = QColor("#B5651D"); // P3: 橙褐（Doxygen 标签，加粗）
+    syntax.todo         = QColor("#D1242F"); // P4: 暖红（TODO/FIXME，斜体）
+    syntax.headerPath   = QColor("#0550AE"); // Bug1: 深蓝（头文件路径，链接风格，可点击跳转）
 }
 
 // ========== QSS 生成（全变量化，零硬编码）==========

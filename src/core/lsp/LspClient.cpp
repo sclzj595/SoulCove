@@ -7,6 +7,40 @@
 #include <QJsonValue>
 #include <QCoreApplication>
 
+// P0 C04-1: LSP CompletionItemKind 整数 → 可读字符串
+// 参考 LSP 规范 https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#completionItemKind
+static QString lspCompletionKindToString(int kind)
+{
+    switch (kind) {
+        case 1:  return QStringLiteral("Text");
+        case 2:  return QStringLiteral("Method");
+        case 3:  return QStringLiteral("Function");
+        case 4:  return QStringLiteral("Constructor");
+        case 5:  return QStringLiteral("Field");
+        case 6:  return QStringLiteral("Variable");
+        case 7:  return QStringLiteral("Class");
+        case 8:  return QStringLiteral("Interface");
+        case 9:  return QStringLiteral("Module");
+        case 10: return QStringLiteral("Property");
+        case 11: return QStringLiteral("Unit");
+        case 12: return QStringLiteral("Value");
+        case 13: return QStringLiteral("Enum");
+        case 14: return QStringLiteral("Keyword");
+        case 15: return QStringLiteral("Snippet");
+        case 16: return QStringLiteral("Color");
+        case 17: return QStringLiteral("File");
+        case 18: return QStringLiteral("Reference");
+        case 19: return QStringLiteral("Folder");
+        case 20: return QStringLiteral("EnumMember");
+        case 21: return QStringLiteral("Constant");
+        case 22: return QStringLiteral("Struct");
+        case 23: return QStringLiteral("Event");
+        case 24: return QStringLiteral("Operator");
+        case 25: return QStringLiteral("TypeParameter");
+        default: return QString();
+    }
+}
+
 // ============================================================
 // 构造 / 析构 — RAII 资源管理
 // ============================================================
@@ -84,6 +118,13 @@ bool LspClient::startServer(const QString& command, const QStringList& args,
     m_initialized = false;
     m_buffer.clear();
     m_pendingRequests.clear();
+    m_symbolRequestUri.clear();  // V2.1 C1: 同步清理请求跟踪表
+    m_timeoutTimers.clear();     // P0 C01: 清理超时定时器
+    m_lastHoverRequestId = -1;   // P0 C01: 重置 stale 跟踪
+    m_lastCompletionRequestId = -1;
+    m_lastDefinitionRequestId = -1;
+    m_lastReferencesRequestId = -1;
+    m_lastImplementationRequestId = -1;
     m_requestId = 0;
 
     LOG_DEBUG_S("LspClient", "startServer", "语言服务器已启动:" << command << args);
@@ -109,6 +150,13 @@ void LspClient::stopServer()
 
     m_initialized = false;
     m_pendingRequests.clear();
+    m_symbolRequestUri.clear();  // V2.1 C1: 同步清理请求跟踪表
+    m_timeoutTimers.clear();     // P0 C01: 清理超时定时器
+    m_lastHoverRequestId = -1;   // P0 C01: 重置 stale 跟踪
+    m_lastCompletionRequestId = -1;
+    m_lastDefinitionRequestId = -1;
+    m_lastReferencesRequestId = -1;
+    m_lastImplementationRequestId = -1;
 
     LOG_DEBUG_S("LspClient", "stopServer", "语言服务器已停止");
     emit serverStopped();
@@ -123,9 +171,10 @@ bool LspClient::isRunning() const noexcept
 // JSON-RPC 消息构建
 // ============================================================
 
-QByteArray LspClient::createRequest(const QString& method, const QJsonObject& params)
+QByteArray LspClient::createRequest(const QString& method, const QJsonObject& params, qint64* outId)
 {
     qint64 id = ++m_requestId;
+    if (outId) *outId = id;
     QJsonObject root;
     root[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
     root[QStringLiteral("id")] = id;
@@ -136,6 +185,27 @@ QByteArray LspClient::createRequest(const QString& method, const QJsonObject& pa
 
     // 记录待处理请求
     m_pendingRequests[id] = method;
+
+    // P0 C01: 通用请求超时机制 — 5s 后若仍未收到响应，从待处理表移除并清理 stale 跟踪
+    auto timer = QSharedPointer<QTimer>::create();
+    timer->setSingleShot(true);
+    connect(timer.data(), &QTimer::timeout, this, [this, id, method]() {
+        // 超时后若请求仍在待处理表中，说明服务器未响应
+        if (m_pendingRequests.contains(id)) {
+            m_pendingRequests.remove(id);
+            m_symbolRequestUri.remove(id);
+            // 清理 stale 跟踪变量（避免后续响应误判）
+            if (m_lastHoverRequestId == id) m_lastHoverRequestId = -1;
+            if (m_lastCompletionRequestId == id) m_lastCompletionRequestId = -1;
+            if (m_lastDefinitionRequestId == id) m_lastDefinitionRequestId = -1;
+            if (m_lastReferencesRequestId == id) m_lastReferencesRequestId = -1;
+            if (m_lastImplementationRequestId == id) m_lastImplementationRequestId = -1;
+            LOG_WARN_S("LspClient", "createRequest", "请求超时 [" << method << "] id=" << id);
+        }
+        m_timeoutTimers.remove(id);
+    });
+    m_timeoutTimers[id] = timer;
+    timer->start(kRequestTimeoutMs);
 
     return QJsonDocument(root).toJson(QJsonDocument::Compact);
 }
@@ -182,6 +252,13 @@ void LspClient::initialize(const QString& rootUri)
     completion[QStringLiteral("completionItem")] = QJsonObject{{QStringLiteral("snippetSupport"), true}};
     textDocument[QStringLiteral("completion")] = completion;
     textDocument[QStringLiteral("hover")] = QJsonObject{{QStringLiteral("contentFormat"), QJsonArray{"markdown", "plaintext"}}};
+
+    // V2.1: 声明支持层级 documentSymbol（返回嵌套 DocumentSymbol[] 而非扁平 SymbolInformation[]）
+    // clangd 收到此声明后会返回带 children 字段的嵌套结构，支持大纲树形层级展示
+    QJsonObject documentSymbol;
+    documentSymbol[QStringLiteral("hierarchicalDocumentSymbolSupport")] = true;
+    textDocument[QStringLiteral("documentSymbol")] = documentSymbol;
+
     capabilities[QStringLiteral("textDocument")] = textDocument;
     params[QStringLiteral("capabilities")] = capabilities;
 
@@ -191,16 +268,33 @@ void LspClient::initialize(const QString& rootUri)
 
 void LspClient::openDocument(const QString& uri, const QString& text, const QString& langId)
 {
+    // V2.0: 重置文档版本号（didOpen version=1，后续 didChange 从 2 开始递增）
+    m_docVersion = 1;
+
     QJsonObject textDoc;
     textDoc[QStringLiteral("uri")] = uri;
     textDoc[QStringLiteral("languageId")] = langId;
-    textDoc[QStringLiteral("version")] = 1;
+    textDoc[QStringLiteral("version")] = m_docVersion;
     textDoc[QStringLiteral("text")] = text;
 
     QJsonObject params;
     params[QStringLiteral("textDocument")] = textDoc;
 
     QByteArray msg = createNotification(QStringLiteral("textDocument/didOpen"), params);
+    sendRawMessage(msg);
+}
+
+// L3: 发送 textDocument/didClose — 关闭文档，避免闲置标签重新激活时重复 didOpen
+// clangd 收到 didClose 后释放该文档的 preamble 缓存，重新 didOpen 时才重建
+void LspClient::closeDocument(const QString& uri)
+{
+    QJsonObject textDoc;
+    textDoc[QStringLiteral("uri")] = uri;
+
+    QJsonObject params;
+    params[QStringLiteral("textDocument")] = textDoc;
+
+    QByteArray msg = createNotification(QStringLiteral("textDocument/didClose"), params);
     sendRawMessage(msg);
 }
 
@@ -213,9 +307,12 @@ void LspClient::changeDocument(const QString& uri, const QString& fullText)
     QJsonArray changesArray;
     changesArray.append(contentChanges);
 
+    // V2.0: 版本号递增（LSP 规范要求每次 didChange 版本号严格递增）
+    ++m_docVersion;
+
     QJsonObject textDoc;
     textDoc[QStringLiteral("uri")] = uri;
-    textDoc[QStringLiteral("version")] = 2;  // 版本号递增
+    textDoc[QStringLiteral("version")] = m_docVersion;
 
     QJsonObject params;
     params[QStringLiteral("textDocument")] = textDoc;
@@ -253,7 +350,10 @@ void LspClient::requestCompletion(const QString& uri, int line, int col)
     params[QStringLiteral("textDocument")] = textDoc;
     params[QStringLiteral("position")] = position;
 
-    QByteArray msg = createRequest(QStringLiteral("textDocument/completion"), params);
+    // P0 C01: 记录最新 completion 请求 ID，用于丢弃 stale 响应
+    qint64 reqId = -1;
+    QByteArray msg = createRequest(QStringLiteral("textDocument/completion"), params, &reqId);
+    m_lastCompletionRequestId = reqId;
     sendRawMessage(msg);
 }
 
@@ -270,7 +370,10 @@ void LspClient::requestDefinition(const QString& uri, int line, int col)
     params[QStringLiteral("textDocument")] = textDoc;
     params[QStringLiteral("position")] = position;
 
-    QByteArray msg = createRequest(QStringLiteral("textDocument/definition"), params);
+    // P0 C01: 记录最新 definition 请求 ID，用于丢弃 stale 响应
+    qint64 reqId = -1;
+    QByteArray msg = createRequest(QStringLiteral("textDocument/definition"), params, &reqId);
+    m_lastDefinitionRequestId = reqId;
     sendRawMessage(msg);
 }
 
@@ -287,7 +390,10 @@ void LspClient::requestHover(const QString& uri, int line, int col)
     params[QStringLiteral("textDocument")] = textDoc;
     params[QStringLiteral("position")] = position;
 
-    QByteArray msg = createRequest(QStringLiteral("textDocument/hover"), params);
+    // F4: 记录本次 hover 请求 ID，用于丢弃 stale 响应
+    qint64 reqId = -1;
+    QByteArray msg = createRequest(QStringLiteral("textDocument/hover"), params, &reqId);
+    m_lastHoverRequestId = reqId;
     sendRawMessage(msg);
 }
 
@@ -308,7 +414,31 @@ void LspClient::requestReferences(const QString& uri, int line, int col)
     params[QStringLiteral("position")] = position;
     params[QStringLiteral("context")] = context;
 
-    QByteArray msg = createRequest(QStringLiteral("textDocument/references"), params);
+    // P0 C01: 记录最新 references 请求 ID，用于丢弃 stale 响应
+    qint64 reqId = -1;
+    QByteArray msg = createRequest(QStringLiteral("textDocument/references"), params, &reqId);
+    m_lastReferencesRequestId = reqId;
+    sendRawMessage(msg);
+}
+
+void LspClient::requestImplementation(const QString& uri, int line, int col)
+{
+    // P0 C03: textDocument/implementation — 请求跳转到实现位置
+    // 响应格式与 definition 相同（Location/Location[]），复用 definitionReady 信号
+    QJsonObject position;
+    position[QStringLiteral("line")] = line;
+    position[QStringLiteral("character")] = col;
+
+    QJsonObject textDoc;
+    textDoc[QStringLiteral("uri")] = uri;
+
+    QJsonObject params;
+    params[QStringLiteral("textDocument")] = textDoc;
+    params[QStringLiteral("position")] = position;
+
+    qint64 reqId = -1;
+    QByteArray msg = createRequest(QStringLiteral("textDocument/implementation"), params, &reqId);
+    m_lastImplementationRequestId = reqId;
     sendRawMessage(msg);
 }
 
@@ -320,7 +450,12 @@ void LspClient::requestSymbols(const QString& uri)
     QJsonObject params;
     params[QStringLiteral("textDocument")] = textDoc;
 
-    QByteArray msg = createRequest(QStringLiteral("textDocument/documentSymbol"), params);
+    // V2.1 C1 修复：记录 requestId → uri，异步响应时精确路由
+    qint64 reqId = -1;
+    QByteArray msg = createRequest(QStringLiteral("textDocument/documentSymbol"), params, &reqId);
+    if (reqId >= 0) {
+        m_symbolRequestUri[reqId] = uri;
+    }
     sendRawMessage(msg);
 }
 
@@ -402,8 +537,11 @@ void LspClient::onServerError()
     QByteArray errData = m_serverProcess->readAllStandardError();
     if (!errData.isEmpty()) {
         QString errMsg = QString::fromUtf8(errData).trimmed();
-        LOG_WARN_S("LspClient", "onServerError", "stderr 输出:" << errMsg);
-        emit serverError(errMsg);
+        // clangd 等 LSP 服务器将正常日志（索引进度、include 检索、编译数据库警告）
+        // 写入 stderr，这是 LSP 协议的标准行为，并非真实错误。
+        // 降级为 DEBUG 日志，且不再 emit serverError（避免上层以 ERROR 重复记录）。
+        // 仅进程异常退出（onServerFinished exitCode!=0）才 emit serverError。
+        LOG_DEBUG_S("LspClient", "onServerError", "[clangd stderr] " << errMsg);
     }
 }
 
@@ -413,6 +551,13 @@ void LspClient::onServerFinished(int exitCode, QProcess::ExitStatus exitStatus)
 
     m_initialized = false;
     m_pendingRequests.clear();
+    m_symbolRequestUri.clear();  // V2.1 C1: 进程退出时清理请求跟踪表
+    m_timeoutTimers.clear();     // P0 C01: 清理超时定时器
+    m_lastHoverRequestId = -1;   // P0 C01: 重置 stale 跟踪
+    m_lastCompletionRequestId = -1;
+    m_lastDefinitionRequestId = -1;
+    m_lastReferencesRequestId = -1;
+    m_lastImplementationRequestId = -1;
 
     if (exitCode != 0) {
         emit serverError(tr("语言服务器异常退出，退出码: %1").arg(exitCode));
@@ -446,6 +591,13 @@ void LspClient::handleMessage(const QJsonObject& msg)
         // === 响应消息 ===
         qint64 id = msg[QStringLiteral("id")].toVariant().toLongLong();
         QString method = m_pendingRequests.take(id);
+
+        // P0 C01: 收到响应，停止对应的超时定时器
+        auto timerIt = m_timeoutTimers.find(id);
+        if (timerIt != m_timeoutTimers.end()) {
+            timerIt.value()->stop();
+            m_timeoutTimers.erase(timerIt);
+        }
 
         // 检查错误响应
         if (msg.contains(QStringLiteral("error"))) {
@@ -482,6 +634,14 @@ void LspClient::handleMessage(const QJsonObject& msg)
 
         // --- textDocument/completion 响应 ---
         if (method == QStringLiteral("textDocument/completion")) {
+            // P0 C01: stale 响应检测 — 丢弃非最新补全请求的响应
+            // （用户已继续输入，旧请求的补全结果不再需要，避免闪烁/覆盖）
+            if (id != m_lastCompletionRequestId) {
+                LOG_DEBUG_S("LspClient", "handleMessage", "丢弃 stale completion 响应: id=" << id
+                          << " 最新=" << m_lastCompletionRequestId);
+                return;
+            }
+
             QList<LspCompletionItem> items;
 
             // 兼容两种格式: CompletionList 或 CompletionItem[]
@@ -492,7 +652,13 @@ void LspClient::handleMessage(const QJsonObject& msg)
                     QJsonObject item = val.toObject();
                     LspCompletionItem ci;
                     ci.label = item[QStringLiteral("label")].toString();
-                    ci.kind = item[QStringLiteral("kind")].toString();
+                    // P0 C04-1: LSP kind 是整数（1-25），需转换为可读字符串
+                    QJsonValue kindVal = item[QStringLiteral("kind")];
+                    if (kindVal.isDouble()) {
+                        ci.kind = lspCompletionKindToString(kindVal.toInt());
+                    } else {
+                        ci.kind = kindVal.toString();
+                    }
                     ci.detail = item[QStringLiteral("detail")].toString();
 
                     // documentation 可能是字符串或对象
@@ -516,6 +682,13 @@ void LspClient::handleMessage(const QJsonObject& msg)
 
         // --- textDocument/definition 响应 ---
         if (method == QStringLiteral("textDocument/definition")) {
+            // P0 C01: stale 响应检测 — 丢弃非最新定义请求的响应
+            if (id != m_lastDefinitionRequestId) {
+                LOG_DEBUG_S("LspClient", "handleMessage", "丢弃 stale definition 响应: id=" << id
+                          << " 最新=" << m_lastDefinitionRequestId);
+                return;
+            }
+
             // 结果可能是单个 Location 或 Location[]
             QJsonObject resultObj = result.toObject();
             if (resultObj.contains(QStringLiteral("uri"))) {
@@ -542,8 +715,48 @@ void LspClient::handleMessage(const QJsonObject& msg)
             return;
         }
 
+        // --- textDocument/implementation 响应 (P0 C03) ---
+        // 响应格式与 definition 相同（Location/Location[]），复用 definitionReady 信号
+        if (method == QStringLiteral("textDocument/implementation")) {
+            if (id != m_lastImplementationRequestId) {
+                LOG_DEBUG_S("LspClient", "handleMessage", "丢弃 stale implementation 响应: id=" << id
+                          << " 最新=" << m_lastImplementationRequestId);
+                return;
+            }
+
+            QJsonObject resultObj = result.toObject();
+            if (resultObj.contains(QStringLiteral("uri"))) {
+                QString uri = resultObj[QStringLiteral("uri")].toString();
+                QJsonObject range = resultObj[QStringLiteral("range")].toObject();
+                QJsonObject start = range[QStringLiteral("start")].toObject();
+                emit definitionReady(uri,
+                                     start[QStringLiteral("line")].toInt(),
+                                     start[QStringLiteral("character")].toInt());
+            } else if (result.isArray()) {
+                QJsonArray locs = result.toArray();
+                if (!locs.isEmpty()) {
+                    QJsonObject first = locs.first().toObject();
+                    QString uri = first[QStringLiteral("uri")].toString();
+                    QJsonObject range = first[QStringLiteral("range")].toObject();
+                    QJsonObject start = range[QStringLiteral("start")].toObject();
+                    emit definitionReady(uri,
+                                         start[QStringLiteral("line")].toInt(),
+                                         start[QStringLiteral("character")].toInt());
+                }
+            }
+            return;
+        }
+
         // --- textDocument/hover 响应 ---
         if (method == QStringLiteral("textDocument/hover")) {
+            // F4: stale 响应检测 — 如果这不是最新的 hover 请求的响应，丢弃
+            // （鼠标已移动到新位置，旧请求的响应不再需要）
+            if (id != m_lastHoverRequestId) {
+                LOG_DEBUG("[LspClient] 丢弃 stale hover 响应: id=" << id
+                          << " 最新=" << m_lastHoverRequestId);
+                return;
+            }
+
             QJsonValue contentsVal = result.toObject().value(QStringLiteral("contents"));
             QString docText;
             if (contentsVal.isObject()) {
@@ -560,6 +773,13 @@ void LspClient::handleMessage(const QJsonObject& msg)
 
         // --- textDocument/references 响应 ---
         if (method == QStringLiteral("textDocument/references")) {
+            // P0 C01: stale 响应检测 — 丢弃非最新引用请求的响应
+            if (id != m_lastReferencesRequestId) {
+                LOG_DEBUG_S("LspClient", "handleMessage", "丢弃 stale references 响应: id=" << id
+                          << " 最新=" << m_lastReferencesRequestId);
+                return;
+            }
+
             // 引用列表 → 发射 referencesReady 信号（L17 查找引用）
             QList<QVariantMap> references;
             QJsonArray refArray = result.isArray() ? result.toArray() : QJsonArray{result};
@@ -579,7 +799,9 @@ void LspClient::handleMessage(const QJsonObject& msg)
             for (const QJsonValue& val : symArray) {
                 symbols.append(val.toVariant().toMap());
             }
-            emit symbolsReady(symbols);
+            // V2.1 C1 修复：按 requestId 精确路由 uri，避免 m_currentRequestFile 被覆盖导致归属错误
+            QString uri = m_symbolRequestUri.take(id);
+            emit symbolsReady(uri, symbols);
             return;
         }
 

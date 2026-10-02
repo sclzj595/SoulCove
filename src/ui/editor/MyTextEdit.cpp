@@ -32,6 +32,7 @@
 #include <QGuiApplication>
 #include <QFontInfo>
 #include <algorithm>
+#include <climits>  // C02-5: INT_MAX（增量渲染可视行范围上限）
 
 // 默认可见 实际要根据配置文件来修改
 MyTextEdit::MyTextEdit(QWidget *parent) : QTextEdit(parent), lineNumersVisible(true)
@@ -87,20 +88,61 @@ MyTextEdit::MyTextEdit(QWidget *parent) : QTextEdit(parent), lineNumersVisible(t
             key == QStringLiteral("Editor/indentStyle")) {
             loadIndentConfig();
         }
+        // P3-M03 子项5: 拼写检查开关变更时同步 SpellChecker 并重新检查
+        if (key == QStringLiteral("Editor/spellCheck")) {
+            SpellChecker::instance().setEnabled(
+                ConfigManager::instance().spellCheckEnabled());
+            m_spellErrors.clear();
+            if (SpellChecker::instance().enabled()) {
+                m_spellCheckTimer.start();
+            } else {
+                viewport()->update();
+            }
+        }
     });
 
-    // ========== L16: 鼠标悬停 LSP hover 初始化 ==========
+    // ========== P3-M03 子项5: 拼写检查防抖定时器 ==========
+    m_spellCheckTimer.setSingleShot(true);
+    m_spellCheckTimer.setInterval(500);
+    connect(&m_spellCheckTimer, &QTimer::timeout, this, &MyTextEdit::performSpellCheck);
+    // 文本变更时启动防抖定时器（文件加载/编辑均会触发，500ms 后批量检查）
+    connect(this, &QTextEdit::textChanged, this, [this]() {
+        if (SpellChecker::instance().enabled()) {
+            m_spellCheckTimer.start();
+        }
+    });
+
+    // ========== L16/H1: 鼠标悬停 LSP hover 初始化 ==========
+    // H1: 防抖延时 300ms→200ms（用户要求 150~200ms 停留才触发）
     m_hoverTimer.setSingleShot(true);
-    m_hoverTimer.setInterval(500);  // 500ms 防抖
+    m_hoverTimer.setInterval(200);
     connect(&m_hoverTimer, &QTimer::timeout, this, [this]() {
         // 定时器触发时，获取鼠标位置对应的文本光标位置
         QTextCursor cursor = cursorForPosition(m_lastHoverPos);
         if (cursor.isNull()) return;
         int line = cursor.blockNumber();
         int col = cursor.columnNumber();
+        // 记录全局坐标（用于弹窗定位）和请求序号（用于 stale 检测）
+        m_lastHoverGlobalPos = mapToGlobal(m_lastHoverPos + QPoint(15, 20));
+        m_hoverSeq++;
         emit lspHoverRequested(line, col);
     });
     setMouseTracking(true);  // 启用鼠标追踪，即使不按键也能收到 mouseMoveEvent
+}
+
+// J1: 静默设置文本 — 抑制 textChanged 引发的补全弹窗触发
+// 用于打开文件、跳转定义等程序化文本加载场景，避免编辑器卡顿
+void MyTextEdit::setPlainTextSilently(const QString& text)
+{
+    m_suppressCompletion = true;
+    setPlainText(text);
+    // 停止可能由 textChanged 启动的补全定时器
+    m_completionTimer.stop();
+    // 隐藏可能已弹出的补全框
+    if (m_completer) {
+        m_completer->hideCompletion();
+    }
+    m_suppressCompletion = false;
 }
 
 // 中间函数 防止补全操作引起递归更新 触发补全更新
@@ -115,6 +157,11 @@ void MyTextEdit::handleTextChanged()
     // 如果标记成忽略下一次 重置标志 return 起到阻断递归
     if (m_ignoreNextUpdate) {
         m_ignoreNextUpdate = false;
+        return;
+    }
+
+    // J1: 程序化文本加载（打开文件/跳转定义）时抑制补全弹窗，避免编辑器卡顿
+    if (m_suppressCompletion) {
         return;
     }
 
@@ -159,10 +206,11 @@ void MyTextEdit::handleTextChanged()
  *          增加m_ignoreNextUpdate判断，防止在忽略更新状态下执行
  */
 void MyTextEdit::updateCompletion() {
-    // 补全组件存在 不处于忽略更新状态 
+    // 补全组件存在 不处于忽略更新状态
     if (m_completer && !m_ignoreNextUpdate) {
         auto context = m_completer->getCurrentContext();
-        if (context.first.length() >= 2) {
+        // H3: 成员补全模式下跳过最小前缀检查，允许 1 字符前缀过滤 LSP 候选
+        if (m_completer->isMemberCompletionMode() || context.first.length() >= 2) {
             updateWordList();
             m_completer->updateCompletionList();
         }
@@ -233,6 +281,13 @@ void MyTextEdit::setExternalSymbols(const QList<QPair<QString, QString>>& symbol
     }
 }
 
+void MyTextEdit::setLspHighlightState(LspHighlightState state)
+{
+    if (m_syntaxHighlighter) {
+        m_syntaxHighlighter->setLspState(state);
+    }
+}
+
 void MyTextEdit::updateWordList()
 {
     // 从textEdit提取历史记录
@@ -249,8 +304,9 @@ void MyTextEdit::updateWordList()
     //     pos += wordRegex.matchedLength();   // 移动到下一个匹配的位置
     // }
     // 使用支持中文的正则表达式
-    QRegularExpression wordRegex(
-        R"(([\w\p{Han}]+))"  // 匹配单词字符和汉字
+    // P0 C02: 正则复用 — 编译一次多次执行，避免每次 updateWordList 重新编译正则
+    static const QRegularExpression wordRegex(
+        QStringLiteral(R"(([\w\p{Han}]+))")  // 匹配单词字符和汉字
     );
     QRegularExpressionMatchIterator it = wordRegex.globalMatch(text);
     while (it.hasNext()) {
@@ -280,6 +336,9 @@ void MyTextEdit::updateWordList()
 }
 
 void MyTextEdit::focusOutEvent(QFocusEvent* event) {
+    // 失焦时中止悬停（切窗口/切标签页等）
+    m_hoverTimer.stop();
+    emit hoverAborted();
     if (m_completer && m_completer->isCompletionVisible()) {
         // 检查新焦点是否在补全框内
         if (!m_completer->isCompleterFocused()) {
@@ -374,6 +433,9 @@ void MyTextEdit::cursorPositionChangedInternal()
 
 void MyTextEdit::wheelEvent(QWheelEvent *event)
 {
+    // F1: 滚动时中止悬停预览（内容位置变化，旧悬停位置失效）
+    m_hoverTimer.stop();
+    emit hoverAborted();
     // Ctrl + 滚轮缩放字体（使用标准 modifiers 检测，无需维护状态标志）
     if (event->modifiers() & Qt::ControlModifier) {
         if (event->angleDelta().y() > 0)
@@ -396,6 +458,15 @@ void MyTextEdit::loadIndentConfig()
     m_useSpaces = (style != QStringLiteral("tabs"));
 
     // 设置 Tab 停止宽度（视觉上 1 个 Tab = tabSize 个字符宽）
+    QFontMetrics fm(font());
+    setTabStopDistance(fm.horizontalAdvance(' ') * m_tabSize);
+}
+
+// P3-M03 子项4: .editorconfig 按文件覆盖缩进配置（不写入全局 ConfigManager）
+void MyTextEdit::setIndentConfig(int tabSize, bool useSpaces)
+{
+    if (tabSize > 0) m_tabSize = tabSize;
+    m_useSpaces = useSpaces;
     QFontMetrics fm(font());
     setTabStopDistance(fm.horizontalAdvance(' ') * m_tabSize);
 }
@@ -433,10 +504,22 @@ void MyTextEdit::keyPressEvent(QKeyEvent *event)
 {
     int key = event->key();
 
+    // 按键时中止悬停预览（非修饰键才触发，避免 Ctrl/Shift 等误触）
+    if (key != Qt::Key_Control && key != Qt::Key_Shift &&
+        key != Qt::Key_Alt && key != Qt::Key_Meta) {
+        m_hoverTimer.stop();
+        emit hoverAborted();
+    }
+
     // ====== T17: 多光标编辑模式 ======
     if (m_multiCursorMode && !m_secondaryCursors.isEmpty()) {
         // Esc: 清除所有次级光标
         if (key == Qt::Key_Escape) {
+            // P3-M03 子项3: 列选模式下 Esc 同时退出列选模式
+            if (m_columnSelectionMode) {
+                m_columnSelectionMode = false;
+                m_columnDragging = false;
+            }
             clearSecondaryCursors();
             event->accept();
             return;
@@ -590,6 +673,49 @@ void MyTextEdit::keyPressEvent(QKeyEvent *event)
         return;
     }
 
+    // H3: 检测成员访问符 . / -> / :: 并自动触发 LSP 成员补全
+    // 输入 . 或 -> 或 :: 后，立即请求 LSP 补全并进入成员补全模式
+    // 成员补全模式下跳过最小前缀检查，允许空前缀显示所有成员
+    if (m_completer && event->text().size() == 1) {
+        QChar typedChar = event->text().at(0);
+        QTextCursor cursor = textCursor();
+        int pos = cursor.position();
+        QString docText = toPlainText();
+
+        bool triggerMember = false;
+        if (typedChar == '.') {
+            // . 成员访问（排除数字小数点：前一个字符是数字时不触发）
+            if (pos >= 2) {
+                QChar prevChar = docText[pos - 2];
+                if (!prevChar.isDigit()) {
+                    triggerMember = true;
+                }
+            } else {
+                triggerMember = true;
+            }
+        } else if (typedChar == '>' && pos >= 2 && docText[pos - 2] == '-') {
+            // -> 指针成员访问
+            triggerMember = true;
+        } else if (typedChar == ':' && pos >= 2 && docText[pos - 2] == ':') {
+            // :: 作用域解析运算符
+            triggerMember = true;
+        }
+
+        if (triggerMember) {
+            m_completer->triggerMemberCompletion();
+            requestLspCompletion();
+            // 不启动普通补全定时器，避免与成员补全冲突
+            highlightMatchingBracket();
+            return;
+        }
+
+        // 输入非单词字符（空格/分号/括号等）时退出成员补全模式
+        if (m_completer->isMemberCompletionMode() &&
+            !typedChar.isLetterOrNumber() && typedChar != '_') {
+            m_completer->clearMemberCompletion();
+        }
+    }
+
     // 更新单词列表并触发补全（排除修饰键）
     if (key != Qt::Key_Control &&
         key != Qt::Key_Shift &&
@@ -655,37 +781,47 @@ void MyTextEdit::lineNumberAreaPaintEvent(QPaintEvent *event)
     QWidget* areaWidget = lineNumberArea->asWidget();
     if (!areaWidget) return;
 
-    // Qpainter 来画
-    QPainter painter(areaWidget);
+    // P0 C02-2: 行号栏渲染缓存 — 滚动位置/宽度/文档版本/折叠状态未变时复用 QImage
+    // 避免水平滚动、光标移动（不引起垂直滚动）等场景下重复渲染行号
+    const int scrollVal = verticalScrollBar()->value();
+    const int areaWidth = areaWidget->width();
+    const int docRev = document()->revision();
+    // 折叠状态签名：用折叠区域数量作为简单签名（折叠/展开操作会改变数量）
+    const int foldSig = m_foldingManager ? m_foldingManager->foldedBlockCount() : 0;
+    // P3-M04 子项3: 断点签名（用断点数量 + 总和作为简单签名）
+    const int bpSig = m_breakpointLines.size();
+
+    if (m_lnCacheScroll == scrollVal && m_lnCacheWidth == areaWidth &&
+        m_lnCacheDocRev == docRev && m_lnCacheFoldSig == foldSig &&
+        m_lnCacheBpSig == bpSig &&
+        !m_lineNumberCache.isNull()) {
+        // 缓存命中：直接将缓存 QImage 绘制到 widget
+        QPainter cachePainter(areaWidget);
+        cachePainter.drawImage(event->rect().topLeft(), m_lineNumberCache, event->rect());
+        return;
+    }
+
+    // 缓存未命中 → 重新渲染到 QImage，再输出到 widget
+    // 使用 Format_ARGB32_Premultiplied（Qt 推荐的快速渲染格式）
+    QImage cache(areaWidth, areaWidget->height(), QImage::Format_ARGB32_Premultiplied);
+    cache.fill(Qt::transparent);
+    QPainter painter(&cache);
+
     // 使用主题色板中的侧边栏背景色
     const auto& palette = ThemeManager::instance().currentPalette();
-    painter.fillRect(event->rect(), palette.bgSideBar);
+    painter.fillRect(cache.rect(), palette.bgSideBar);
 
-    // 替换为 QTextEdit 兼容的方式获取第一个可见块
-    QTextCursor cursor(document());
-    cursor.movePosition(QTextCursor::Start);
-    
-    // 计算可见区域
-    QRect visibleRect = viewport()->rect();
-    int verticalScrollValue = verticalScrollBar()->value();
-    int contentHeight = document()->documentLayout()->documentSize().height();
-    
-    // 查找第一个可见的文本块
-    QTextBlock block = document()->firstBlock();
+    // P0 C02: 性能优化 — 只遍历可见行，避免大文件（10k+行）时遍历全文
+    // 使用 cursorForPosition 定位第一个可见块，O(可见行数) 而非 O(总行数)
+    QTextCursor cursor = cursorForPosition(QPoint(0, 0));
+    QTextBlock block = cursor.block();
     int blockNumber = block.blockNumber();
-    
+
     // 获取文档布局
     QAbstractTextDocumentLayout *layout = document()->documentLayout();
-    
-    // 计算块的顶部位置
-    QRectF blockRect = layout->blockBoundingRect(block);
-    qreal top = blockRect.top();
-    qreal bottom = top + blockRect.height();
-    
-    // 调整到可见区域
-    top -= verticalScrollValue;
-    bottom -= verticalScrollValue;
-    
+    int verticalScrollValue = verticalScrollBar()->value();
+    QRect visibleRect = viewport()->rect();
+
     painter.setPen(palette.fgLineNumber);  // 使用主题色板行号色
     QFont font = this->font();
     // 行号字体跟随编辑器字体大小（比编辑器字体小 1pt，视觉更协调）
@@ -698,17 +834,58 @@ void MyTextEdit::lineNumberAreaPaintEvent(QPaintEvent *event)
     font.setPointSize(editorSize > 2 ? editorSize - 1 : editorSize);
     painter.setFont(font);
 
-    // 遍历所有文本块
+    // P2-H03 子项3: Git blame 颜色调色板（6 色）
+    // 同一提交 hash 哈希到固定颜色，连续同提交行同色，不同提交切换颜色
+    static const QColor kBlamePalette[] = {
+        QColor( 78, 201, 176),  // 绿
+        QColor( 86, 156, 214),  // 蓝
+        QColor(244,  71,  71),  // 红
+        QColor(220, 220, 170),  // 黄
+        QColor(197, 134, 192),  // 紫
+        QColor(156, 220, 254)   // 青
+    };
+    const int kBlameBarWidth = 4;  // 颜色条宽度（像素）
+
+    // 遍历可见文本块（从第一个可见块开始，到可见区域底部结束）
     while (block.isValid()) {
-        blockRect = layout->blockBoundingRect(block);
-        top = blockRect.top() - verticalScrollValue;
-        bottom = top + blockRect.height();
-        
+        QRectF blockRect = layout->blockBoundingRect(block);
+        qreal top = blockRect.top() - verticalScrollValue;
+        qreal bottom = top + blockRect.height();
+
+        // 超出可见区域底部 → 停止遍历
+        if (top > visibleRect.bottom()) break;
+
         // 检查块是否在可见区域内
         if (bottom >= visibleRect.top() && top <= visibleRect.bottom()) {
             QString number = QString::number(blockNumber + 1);
-            painter.drawText(0, top, areaWidget->width(), fontMetrics().height(),
+            painter.drawText(0, static_cast<int>(top), areaWidget->width(), fontMetrics().height(),
                             Qt::AlignCenter, number);
+
+            // P3-M04 子项3: 绘制断点红圆点（行号栏左边缘 8px 区域）
+            if (m_breakpointLines.contains(blockNumber + 1)) {
+                // 圆点直径取行高的 60%，与行垂直居中
+                int dotSize = qMax(6, static_cast<int>(fontMetrics().height() * 0.6));
+                int dotX = 4;  // 左侧留 4px 边距
+                int dotY = static_cast<int>(top + (blockRect.height() - dotSize) / 2.0);
+                painter.setBrush(QColor(220, 60, 60));   // 红色填充
+                painter.setPen(Qt::NoPen);
+                painter.drawEllipse(dotX, dotY, dotSize, dotSize);
+                painter.setBrush(Qt::NoBrush);            // 恢复
+                painter.setPen(palette.fgLineNumber);     // 恢复行号色
+            }
+
+            // P2-H03 子项3: 绘制 Git blame 颜色条（行号右侧 4px）
+            if (m_gitBlameVisible && !m_gitBlameInfo.isEmpty()) {
+                auto it = m_gitBlameInfo.constFind(blockNumber + 1);
+                if (it != m_gitBlameInfo.constEnd() && !it->commitHash.isEmpty()) {
+                    // 按提交 hash 哈希到 6 色调色板
+                    size_t h = qHash(it->commitHash);
+                    QColor barColor = kBlamePalette[h % 6];
+                    int barX = areaWidget->width() - kBlameBarWidth;
+                    QRectF barRect(barX, top, kBlameBarWidth, blockRect.height());
+                    painter.fillRect(barRect, barColor);
+                }
+            }
         }
 
         // 绘制折叠图标（委托给 CodeFoldingManager）
@@ -723,6 +900,18 @@ void MyTextEdit::lineNumberAreaPaintEvent(QPaintEvent *event)
         block = block.next();
         blockNumber++;
     }
+
+    // 保存缓存并更新缓存 key
+    m_lineNumberCache = cache;
+    m_lnCacheScroll = scrollVal;
+    m_lnCacheWidth = areaWidth;
+    m_lnCacheDocRev = docRev;
+    m_lnCacheFoldSig = foldSig;
+    m_lnCacheBpSig = bpSig;
+
+    // 将缓存 QImage 输出到 widget
+    QPainter widgetPainter(areaWidget);
+    widgetPainter.drawImage(event->rect().topLeft(), cache, event->rect());
 }
 
 // ========== 代码折叠实现 ==========
@@ -746,9 +935,62 @@ bool MyTextEdit::isFolded(int blockNumber) const
 
 void MyTextEdit::lineNumberAreaClicked(const QPoint& pos, int areaWidth)
 {
+    // P3-M04 子项3: 优先处理断点切换（点击行号栏左半空白区域）
+    // 折叠图标绘制在行号区右侧（iconX = areaWidth - foldIconSize - 2），
+    // 断点红圆点绘制在行号区左侧（约 8~14 像素区域），互不冲突。
+    // 这里：点击行号栏前半区域（x < areaWidth/2）触发断点切换；
+    //       点击后半区域（含折叠图标）保持原折叠逻辑
+    if (pos.x() < areaWidth / 2) {
+        QTextCursor cursor = cursorForPosition(QPoint(0, pos.y()));
+        if (!cursor.isNull()) {
+            int line = cursor.blockNumber() + 1;  // 1-based
+            toggleBreakpoint(line);
+            return;  // 不再触发折叠
+        }
+    }
+
     if (!m_foldingManager) return;
     QTextCursor cursor = cursorForPosition(QPoint(0, pos.y()));
     m_foldingManager->onLineNumberAreaClicked(pos, areaWidth, cursor);
+}
+
+// ============================================================
+// P3-M04 子项3: 断点切换实现
+// ============================================================
+
+void MyTextEdit::toggleBreakpoint(int line)
+{
+    if (line < 1) return;
+
+    bool enabled;
+    if (m_breakpointLines.contains(line)) {
+        m_breakpointLines.remove(line);
+        enabled = false;
+    } else {
+        m_breakpointLines.insert(line);
+        enabled = true;
+    }
+
+    // 断点变化时失效行号栏缓存
+    m_lnCacheBpSig = -1;
+    updateLineNumberArea();
+
+    emit breakpointToggled(line, enabled);
+}
+
+void MyTextEdit::setBreakpoints(const QSet<int>& lines)
+{
+    m_breakpointLines = lines;
+    m_lnCacheBpSig = -1;
+    updateLineNumberArea();
+}
+
+void MyTextEdit::clearBreakpoints()
+{
+    if (m_breakpointLines.isEmpty()) return;
+    m_breakpointLines.clear();
+    m_lnCacheBpSig = -1;
+    updateLineNumberArea();
 }
 
 /// @brief 窗口大小改变事件
@@ -758,6 +1000,9 @@ void MyTextEdit::resizeEvent(QResizeEvent* event)
     QTextEdit::resizeEvent(event);
     updateLineNumberArea();
 
+    // P0 C02-2: resize 时行号栏尺寸变化，失效渲染缓存
+    m_lnCacheWidth = -1;
+
     // 更新迷你地图位置和大小 (M7) — 委托给 MinimapRenderer
     if (m_minimapRenderer) {
         m_minimapRenderer->handleResize(width(), height());
@@ -766,6 +1011,10 @@ void MyTextEdit::resizeEvent(QResizeEvent* event)
 
 void MyTextEdit::paintEvent(QPaintEvent *event)
 {
+    // C02-5: 编辑器增量渲染 — 在调用基类 paintEvent 前记录脏区域和滚动位置
+    const QRect paintRect = event->rect();
+    const int  scrollY    = verticalScrollBar() ? verticalScrollBar()->value() : 0;
+
     QTextEdit::paintEvent(event);   // 基类保证默认进行
 
     // 收集所有额外选择（当前行高亮 + 括号匹配高亮）
@@ -797,7 +1046,29 @@ void MyTextEdit::paintEvent(QPaintEvent *event)
         QPainter painter(viewport());
         const int lineHeight = fontMetrics().height();
 
+        // C02-5: 增量渲染 — 仅遍历行号在 event->rect() 覆盖范围内的诊断
+        // 用 cursorForPosition 获取可视区域起止行号（0-based blockNumber）
+        // 避免大文件全量遍历所有诊断（性能优化）
+        int visibleStartLine = 0;
+        int visibleEndLine   = INT_MAX;
+        // cursorForPosition 在 rect 边界外可能返回空光标，需做有效性校验
+        QTextCursor topCursor = cursorForPosition(QPoint(0, paintRect.top()));
+        if (!topCursor.isNull()) {
+            visibleStartLine = topCursor.blockNumber();
+        }
+        // bottom() 可能位于最后一行之下，cursorForPosition 仍会返回最后一行的光标
+        QTextCursor bottomCursor = cursorForPosition(QPoint(0, paintRect.bottom()));
+        if (!bottomCursor.isNull()) {
+            visibleEndLine = bottomCursor.blockNumber();
+        }
+
         for (const auto& diag : m_diagnostics) {
+            // 增量渲染裁剪：诊断起始行不在可视范围内则跳过
+            // diag.startLine 为 0-based，与 blockNumber() 一致
+            if (diag.startLine < visibleStartLine || diag.startLine > visibleEndLine) {
+                continue;
+            }
+
             // 根据严重程度选择颜色
             QColor waveColor;
             switch (diag.severity) {
@@ -838,22 +1109,156 @@ void MyTextEdit::paintEvent(QPaintEvent *event)
             }
         }
     }
+
+    // ========== P3-M03 子项5: 拼写错误波浪线绘制 ==========
+    // 红色波浪下划线，复用诊断波浪线算法，按可视行范围裁剪
+    if (!m_spellErrors.isEmpty()) {
+        QPainter painter(viewport());
+        // 复用上方诊断块计算的可见行范围（visibleStartLine/visibleEndLine）
+        // 重新计算一次以避免变量作用域问题
+        int visStartLine = 0;
+        int visEndLine = INT_MAX;
+        QTextCursor topC = cursorForPosition(QPoint(0, paintRect.top()));
+        if (!topC.isNull()) visStartLine = topC.blockNumber();
+        QTextCursor botC = cursorForPosition(QPoint(0, paintRect.bottom()));
+        if (!botC.isNull()) visEndLine = botC.blockNumber();
+
+        QColor spellColor(255, 0, 0);  // 红色波浪线
+        painter.setPen(QPen(spellColor, 1, Qt::SolidLine));
+
+        for (const auto& err : m_spellErrors) {
+            // 边界保护：文档可能已变更导致区间失效（防抖窗口内位置过期）
+            if (err.start < 0 || err.start + err.length > document()->characterCount()) continue;
+
+            // 通过起始位置定位行号，判断是否在可视范围内
+            QTextCursor c(document());
+            c.setPosition(err.start);
+            int errLine = c.blockNumber();
+            if (errLine < visStartLine || errLine > visEndLine) continue;
+
+            // 计算单词起止像素坐标
+            QTextCursor endC(document());
+            endC.setPosition(err.start + err.length);
+
+            QRect startRect = cursorRect(c);
+            QRect endRect = cursorRect(endC);
+            int startX = startRect.left();
+            int endX = endRect.left();
+            int startY = startRect.bottom();
+
+            if (startY <= 0 || endX <= startX) continue;
+            // 绘制波浪线（与诊断相同算法）
+            int yy = startY;
+            for (int x = startX; x < endX; x += 6) {
+                painter.drawLine(x, yy, x + 3, yy + 2);
+                painter.drawLine(x + 3, yy + 2, x + 6, yy);
+            }
+        }
+    }
+
+    // C02-5: 记录本次绘制的脏区域和滚动位置，供后续增量渲染参考
+    m_lastPaintRect    = paintRect;
+    m_lastPaintScrollY = scrollY;
 }
 
-/// @brief 鼠标点击事件：处理 Alt+Click 添加次级光标，点击后更新括号匹配高亮
+/// @brief 鼠标移动事件：H1 重写 hover 触发策略
+/// H1 核心修复：
+///   1. 鼠标移动时立即取消 pending 的 LSP hover 请求（发射 hoverAborted）
+///   2. 鼠标移动时立即隐藏已显示的弹窗（hoverAborted → hideImmediately）
+///   3. 重启 200ms 防抖定时器，仅当鼠标静止停留 200ms 才触发新请求
+/// 效果：快速划过/滑动不触发预览，杜绝弹窗闪现、刷新、卡顿
 void MyTextEdit::mouseMoveEvent(QMouseEvent* event)
 {
-    // L16: 鼠标移动时重置悬停定时器（500ms 防抖）
-    // 只有当鼠标位置变化时才重置，避免不必要的 LSP 请求
+    // P3-M03 子项3: 列选拖拽中 → 实时重建列选光标
+    if (m_columnDragging && m_columnSelectionMode) {
+        QTextCursor startCursor = cursorForPosition(m_columnSelectStart);
+        QTextCursor endCursor = cursorForPosition(event->pos());
+        if (!startCursor.isNull() && !endCursor.isNull()) {
+            rebuildColumnCursors(startCursor.blockNumber(), m_columnSelectStartCol,
+                                 endCursor.blockNumber(), endCursor.columnNumber());
+        }
+        event->accept();
+        return;
+    }
+
     if (m_lastHoverPos != event->pos()) {
         m_lastHoverPos = event->pos();
+        // H1: 鼠标移动 → 立即取消 pending hover 请求 + 隐藏弹窗
+        // 避免鼠标滑动时弹窗频繁闪现、刷新（旧请求未取消导致视觉割裂）
+        m_hoverTimer.stop();
+        emit hoverAborted();
+        // 重启防抖定时器：仅当鼠标静止停留 200ms 才重新触发
         m_hoverTimer.start();
     }
+
+    // Bug1/Bug2: Ctrl 按住时显示手型光标（VSCode 风格，提示可 Ctrl+Click 跳转）
+    if (event->modifiers() & Qt::ControlModifier) {
+        viewport()->setCursor(Qt::PointingHandCursor);
+    } else {
+        viewport()->unsetCursor();
+    }
+
     QTextEdit::mouseMoveEvent(event);
+}
+
+void MyTextEdit::leaveEvent(QEvent* event)
+{
+    // 鼠标离开编辑器 → 停止悬停定时器，中止悬停请求
+    m_hoverTimer.stop();
+    emit hoverAborted();
+    QTextEdit::leaveEvent(event);
+}
+
+void MyTextEdit::mouseReleaseEvent(QMouseEvent* event)
+{
+    // P3-M03 子项3: 列选拖拽结束 — 仅停止拖拽标志，保留列选光标供后续编辑
+    if (m_columnDragging) {
+        m_columnDragging = false;
+        event->accept();
+        return;
+    }
+    QTextEdit::mouseReleaseEvent(event);
 }
 
 void MyTextEdit::mousePressEvent(QMouseEvent* event)
 {
+    // P3-M03 子项3: Shift+Alt+左键拖拽 → 进入列选择模式
+    // 必须在 C03-6 (Ctrl+Alt) 和 T17 (Alt+Click) 分支之前匹配
+    if ((event->modifiers() & Qt::ShiftModifier) &&
+        (event->modifiers() & Qt::AltModifier) &&
+        event->button() == Qt::LeftButton) {
+        QTextCursor clickCursor = cursorForPosition(event->pos());
+        if (!clickCursor.isNull()) {
+            m_columnSelectionMode = true;
+            m_columnDragging = true;
+            m_columnSelectStart = event->pos();
+            m_columnSelectStartCol = clickCursor.columnNumber();
+            // 初始：起点即终点（单点列选，先建立主光标）
+            rebuildColumnCursors(clickCursor.blockNumber(),
+                                 clickCursor.columnNumber(),
+                                 clickCursor.blockNumber(),
+                                 clickCursor.columnNumber());
+        }
+        event->accept();
+        return;
+    }
+
+    // C03-6: Ctrl+Alt+左键单击 → 请求定义预览（不跳转，悬浮显示）
+    // 必须在 T17 Alt+Click 分支之前匹配：Ctrl+Alt 同时按下时 Qt::AltModifier 也为真
+    // 不修改 T17 的纯 Alt+Click 行为，仅在新增 Ctrl 修饰时改走预览路径
+    if ((event->modifiers() & Qt::AltModifier) &&
+        (event->modifiers() & Qt::ControlModifier) &&
+        event->button() == Qt::LeftButton) {
+        QTextCursor clickCursor = cursorForPosition(event->pos());
+        if (!clickCursor.isNull()) {
+            setTextCursor(clickCursor);  // 先定位光标，供 Widget 读取行/列
+            emit definitionPreviewRequested(clickCursor.blockNumber() + 1,
+                                            clickCursor.columnNumber() + 1);
+            event->accept();
+            return;
+        }
+    }
+
     // T17: Alt+Click 添加次级光标
     if (event->modifiers() & Qt::AltModifier) {
         QTextCursor clickCursor = cursorForPosition(event->pos());
@@ -873,6 +1278,14 @@ void MyTextEdit::mousePressEvent(QMouseEvent* event)
     if ((event->modifiers() & Qt::ControlModifier) && event->button() == Qt::LeftButton) {
         QTextCursor clickCursor = cursorForPosition(event->pos());
         if (!clickCursor.isNull()) {
+            // Bug1: 优先检测 #include 头文件路径点击 → 打开头文件（而非 LSP 跳转定义）
+            QString includeText;
+            bool isSystem = false;
+            if (extractIncludeAtCursor(clickCursor, includeText, isSystem)) {
+                emit includeOpenRequested(includeText, isSystem);
+                event->accept();
+                return;
+            }
             setTextCursor(clickCursor);  // 先定位光标到点击符号，供 onLspGotoDefinition 读取
             emit lspGotoDefinitionRequested();
             event->accept();
@@ -885,7 +1298,41 @@ void MyTextEdit::mousePressEvent(QMouseEvent* event)
     if (m_multiCursorMode) {
         clearSecondaryCursors();
     }
+    // P3-M03 子项3: 任意非列选拖拽的普通点击退出列选模式
+    if (m_columnSelectionMode) {
+        m_columnSelectionMode = false;
+        clearColumnCursors();
+    }
     highlightMatchingBracket();
+}
+
+// ========== Bug1: #include 头文件路径检测 ==========
+
+bool MyTextEdit::extractIncludeAtCursor(const QTextCursor& cursor, QString& includeText, bool& isSystem)
+{
+    if (cursor.isNull()) return false;
+
+    QTextBlock block = cursor.block();
+    QString lineText = block.text();
+
+    // 匹配 #include 指令行，提取路径部分
+    // 支持: #include <header>  /  #include "header"  /  #  include <header>
+    static const QRegularExpression includeRe(
+        QStringLiteral("^\\s*#\\s*include\\s*([<\"])([^>\"\n]+)[>\"]"));
+    QRegularExpressionMatch m = includeRe.match(lineText);
+    if (!m.hasMatch()) return false;
+
+    // 检查光标位置是否在路径范围内（含尖括号/引号）
+    int pathStart = m.capturedStart(0) + m.capturedStart(1);  // < 或 " 的位置
+    int pathEnd = pathStart + 1 + m.capturedLength(2) + 1;    // 含 > 或 "
+    int cursorPos = cursor.position() - block.position();
+    if (cursorPos < pathStart || cursorPos > pathEnd) return false;
+
+    // 输出原始 include 文本（含定界符）
+    QChar delim = m.captured(1).at(0);
+    isSystem = (delim == QLatin1Char('<'));
+    includeText = delim + m.captured(2) + (isSystem ? QLatin1Char('>') : QLatin1Char('"'));
+    return true;
 }
 
 // ========== 括号匹配高亮实现 ==========
@@ -1056,10 +1503,17 @@ void MyTextEdit::setFontSize(int size)
         size = ConfigManager::instance().fontSize();
         if (size <= 0) size = 14;  // 最终兜底
     }
-    QFont font = this->font();
-    // 同时清除 pixelSize，避免 pointSize 与 pixelSize 共存时 Qt 行为不确定
-    font.setPixelSize(-1);
+    // 修复：避免调用 setPixelSize(-1)（会触发 Qt 警告 "Pixel size <= 0"）。
+    // 改为基于 family 构造新字体，仅设置 pointSize，从根源消除 pixelSize 残留。
+    QFont oldFont = this->font();
+    QFont font(oldFont.family());
     font.setPointSize(size);
+    font.setBold(oldFont.bold());
+    font.setItalic(oldFont.italic());
+    font.setUnderline(oldFont.underline());
+    font.setStrikeOut(oldFont.strikeOut());
+    font.setFamily(oldFont.family());  // 保留等宽字体族
+    if (oldFont.fixedPitch()) font.setFixedPitch(true);
     this->setFont(font);
     // 通知外部（Widget 同步到 ConfigManager 和其他编辑器）
     emit fontSizeChanged(size);
@@ -1160,6 +1614,39 @@ void MyTextEdit::requestLspCompletion()
     emit lspCompletionRequested(line, col);
 }
 
+// ========== P2-H03 子项3: Git blame 行级标注 ==========
+
+void MyTextEdit::setGitBlameInfo(const QList<GitBlameLine>& info)
+{
+    m_gitBlameInfo.clear();
+    m_gitBlameInfo.reserve(info.size());
+    for (const GitBlameLine& bl : info) {
+        m_gitBlameInfo.insert(bl.lineNumber, bl);
+    }
+    // 失效行号栏缓存，触发重绘
+    m_lnCacheDocRev = -1;
+    if (lineNumberArea && lineNumberArea->asWidget())
+        lineNumberArea->asWidget()->update();
+}
+
+void MyTextEdit::clearGitBlameInfo()
+{
+    m_gitBlameInfo.clear();
+    m_lnCacheDocRev = -1;
+    if (lineNumberArea && lineNumberArea->asWidget())
+        lineNumberArea->asWidget()->update();
+}
+
+void MyTextEdit::setGitBlameVisible(bool visible)
+{
+    if (m_gitBlameVisible == visible) return;
+    m_gitBlameVisible = visible;
+    // 失效缓存并重绘行号栏
+    m_lnCacheDocRev = -1;
+    if (lineNumberArea && lineNumberArea->asWidget())
+        lineNumberArea->asWidget()->update();
+}
+
 // ====================================================================
 // 右键菜单 (VSCode 风格增强版)
 // ====================================================================
@@ -1173,6 +1660,38 @@ void MyTextEdit::requestLspCompletion()
 void MyTextEdit::contextMenuEvent(QContextMenuEvent* e)
 {
     QMenu* menu = createStandardContextMenu();
+
+    // ===== P3-M03 子项5: 拼写建议（光标位于拼写错误单词上时显示）=====
+    if (SpellChecker::instance().enabled()) {
+        QTextCursor clickCursor = cursorForPosition(e->pos());
+        if (!clickCursor.isNull()) {
+            const SpellMisspelledRange* err = spellErrorAt(clickCursor.position());
+            if (err) {
+                QStringList sugg = SpellChecker::instance().suggestions(err->word, 5);
+                if (!sugg.isEmpty()) {
+                    for (const QString& s : sugg) {
+                        QAction* suggAct = menu->addAction(tr("更正为: %1").arg(s));
+                        connect(suggAct, &QAction::triggered, this, [this, err, s]() {
+                            QTextCursor c(document());
+                            c.setPosition(err->start);
+                            c.setPosition(err->start + err->length, QTextCursor::KeepAnchor);
+                            c.insertText(s);
+                            // 替换后重新检查（防抖定时器会自动触发）
+                        });
+                    }
+                    menu->addSeparator();
+                }
+                // 添加到用户词典
+                QAction* addAct = menu->addAction(tr("将 \"%1\" 添加到词典").arg(err->word));
+                connect(addAct, &QAction::triggered, this, [this, err]() {
+                    SpellChecker::instance().addToDictionary(err->word);
+                    // 立即重新检查（新词已入词典，该错误会消失）
+                    performSpellCheck();
+                });
+                menu->addSeparator();
+            }
+        }
+    }
 
     // --- 分隔符 ---
     menu->addSeparator();
@@ -1231,6 +1750,21 @@ void MyTextEdit::contextMenuEvent(QContextMenuEvent* e)
     // ===== 在文件管理器中打开 =====
     QAction* openFolderAct = menu->addAction(tr("在文件管理器中打开"));
     connect(openFolderAct, &QAction::triggered, this, &MyTextEdit::openInFolderRequested);
+
+    menu->addSeparator();
+
+    // ===== P2-H01: 在终端运行（选中代码）=====
+    QAction* runInTermAct = menu->addAction(tr("在终端运行"));
+    runInTermAct->setEnabled(textCursor().hasSelection());
+    runInTermAct->setToolTip(tr("将选中的代码发送到终端执行"));
+    connect(runInTermAct, &QAction::triggered, this, [this]() {
+        QString code = textCursor().selectedText();
+        // QTextCursor::selectedText() 返回 U+2029 作为段落分隔符，替换为换行符
+        code.replace(QChar(0x2029), QChar('\n'));
+        if (!code.isEmpty()) {
+            emit runInTerminalRequested(code);
+        }
+    });
 
     menu->exec(e->globalPos());
     delete menu;
@@ -1392,4 +1926,136 @@ void MyTextEdit::clearSecondaryCursors()
     m_secondarySelections.clear();
     m_multiCursorMode = false;
     viewport()->update();
+}
+
+// ====================================================================
+// P3-M03 子项1: EOL（行尾）配置实现
+// ====================================================================
+
+void MyTextEdit::setEolMode(const QString& eol)
+{
+    QString normalized = eol.toUpper();
+    if (normalized != QStringLiteral("LF") &&
+        normalized != QStringLiteral("CRLF") &&
+        normalized != QStringLiteral("CR")) {
+        return;  // 非法值忽略
+    }
+    if (m_eolMode == normalized) {
+        emit eolModeChanged(m_eolMode);
+        return;
+    }
+    m_eolMode = normalized;
+    // Qt 文档内部统一使用 '\n' 作为段落分隔符，无需在此处转换文档内容
+    // 实际行尾转换在保存时由 FileOperator::convertEol() 完成
+    emit eolModeChanged(m_eolMode);
+    viewport()->update();
+}
+
+// ====================================================================
+// P3-M03 子项3: 列选择模式实现
+// ====================================================================
+//
+// 设计说明：
+//   - Shift+Alt+左键拖拽进入列选模式
+//   - 拖拽范围内每行创建一个 QTextCursor，所有光标选中相同列范围
+//   - 列选模式下输入字符同步到所有光标（复用 T17 多光标架构）
+//   - Esc / 鼠标单击 / 失焦退出列选模式
+//
+// 与 T17 多光标的关系：
+//   - T17：Alt+Click 添加次级光标（多光标点）
+//   - P3-M03：Shift+Alt+拖拽生成列选光标（多光标列块）
+//   - 两者复用 m_secondaryCursors/m_secondarySelections 视觉显示
+//   - 列选模式下 m_columnCursors 仅记录列选状态，实际编辑通过 m_secondaryCursors 完成
+
+void MyTextEdit::setColumnSelectionMode(bool enabled)
+{
+    if (m_columnSelectionMode == enabled) return;
+    m_columnSelectionMode = enabled;
+    if (!enabled) {
+        m_columnCursors.clear();
+        m_columnDragging = false;
+        // 退出列选时同时清除次级光标（避免残留选择高亮）
+        clearSecondaryCursors();
+    }
+    viewport()->update();
+}
+
+void MyTextEdit::clearColumnCursors()
+{
+    m_columnCursors.clear();
+    m_columnDragging = false;
+    clearSecondaryCursors();
+}
+
+int MyTextEdit::columnAtPosition(const QPoint& pos) const
+{
+    // 通过 cursorForPosition 获取该像素位置的列号
+    QTextCursor c = cursorForPosition(pos);
+    return c.isNull() ? 0 : c.columnNumber();
+}
+
+void MyTextEdit::rebuildColumnCursors(int startLine, int startCol, int endLine, int endCol)
+{
+    // 标准化：确保 startLine <= endLine，startCol <= endCol
+    if (startLine > endLine) std::swap(startLine, endLine);
+    if (startCol > endCol) std::swap(startCol, endCol);
+
+    m_columnCursors.clear();
+    m_secondaryCursors.clear();  // 复用 T17 视觉显示
+
+    QTextCursor cursor(document());
+    for (int line = startLine; line <= endLine; ++line) {
+        cursor.movePosition(QTextCursor::Start);
+        cursor.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, line);
+        // 移动到 startCol（注意不能超出该行长度）
+        QTextBlock block = cursor.block();
+        int lineLength = block.text().length();
+        int selStart = qMin(startCol, lineLength);
+        int selEnd = qMin(endCol, lineLength);
+        if (selEnd <= selStart) continue;  // 该行太短，跳过
+
+        cursor.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, selStart);
+        cursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, selEnd - selStart);
+
+        m_columnCursors.append(cursor);
+        // 同时加入次级光标列表（复用 T17 高亮显示）
+        // 主光标用第一行的 cursor，其余作为次级
+        if (m_columnCursors.size() == 1) {
+            setTextCursor(cursor);
+        } else {
+            m_secondaryCursors.append(cursor);
+        }
+    }
+
+    // P3-M03 子项3: 多行列选时设置多光标模式标志（复用 T17 的 keyPressEvent 输入分发）
+    m_multiCursorMode = (m_secondaryCursors.size() > 0);
+
+    // 若只有一行（非列选场景），主光标已设置；多行则次级光标列表记录其余行
+    updateSecondaryCursorDisplay();
+}
+
+// ====================================================================
+// P3-M03 子项5: 拼写检查实现
+// ====================================================================
+
+void MyTextEdit::performSpellCheck()
+{
+    if (!SpellChecker::instance().enabled()) {
+        m_spellErrors.clear();
+        viewport()->update();
+        return;
+    }
+    // 全文档扫描（防抖已限制频率，大文件可接受）
+    m_spellErrors = SpellChecker::instance().checkText(toPlainText());
+    viewport()->update();
+}
+
+const SpellMisspelledRange* MyTextEdit::spellErrorAt(int docPosition) const
+{
+    for (const auto& err : m_spellErrors) {
+        if (docPosition >= err.start && docPosition < err.start + err.length) {
+            return &err;
+        }
+    }
+    return nullptr;
 }

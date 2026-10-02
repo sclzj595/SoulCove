@@ -25,11 +25,20 @@ class CodeFoldingManager : public QObject
     Q_OBJECT
 
 public:
+    /// P3-M03 子项2: 折叠区域类型（用于行号栏图标颜色区分）
+    enum FoldRegionType {
+        Brace       = 0,  // {} 配对（默认，最常见）
+        Indentation = 1,  // 缩进折叠（基于缩进级别）
+        Region      = 2,  // #region / #endregion（C#/VS 风格）
+        Comment     = 3   // // {{{ / // }}} 或 // region: / // endregion: 自定义折叠标记
+    };
+
     /// 折叠区域描述
     struct FoldRegion {
         int startBlock;    // 折叠起始块号（包含 { 的行）
         int endBlock;      // 折叠结束块号（包含 } 的行）
         bool folded;       // 是否已折叠
+        FoldRegionType type = Brace;  // P3-M03 子项2: 折叠区域类型
     };
 
     explicit CodeFoldingManager(QTextEdit* editor, QObject* parent = nullptr);
@@ -61,6 +70,10 @@ public:
     /// 查询某块是否已折叠
     bool isFolded(int blockNumber) const;
 
+    /// P3-M03 子项2: 查询指定块的折叠区域类型（用于行号栏图标颜色区分）
+    /// 若不是折叠区起点，返回 Brace（默认）
+    FoldRegionType foldRegionType(int blockNumber) const;
+
     // === 行号区交互 ===
 
     /// 处理行号区点击（判断是否点击折叠图标）
@@ -83,12 +96,29 @@ public:
     /// 折叠图标尺寸
     int foldIconSize() const { return m_foldIconSize; }
 
+    /// P0 C02-2: 已折叠区域数量（作为行号栏缓存失效签名）
+    int foldedBlockCount() const;
+
+signals:
+    /// P3-M03 子项2: 折叠状态变化信号（折叠/展开时通知外部刷新视图）
+    /// @param blockNumber 折叠区域起始块号
+    /// @param folded 新的折叠状态（true=已折叠，false=已展开）
+    /// @param type 折叠区域类型（Brace/Indentation/Region/Comment）
+    void foldStateChanged(int blockNumber, bool folded, int type);
+
 private:
     /// 按 startBlock 查找折叠区域
     FoldRegion* findFoldRegion(int blockNumber);
+    const FoldRegion* findFoldRegionConst(int blockNumber) const;  // P3-M03 子项2: const 查询
 
     /// 应用折叠状态到文档（隐藏/显示块）
     void applyFoldState();
+
+    /// P3-M03 子项2: 扫描 #region / #endregion 标记（C#/VS 风格）
+    void scanRegionMarkers();
+
+    /// P3-M03 子项2: 扫描自定义折叠标记 // {{{ / // }}} 和 // region: / // endregion:
+    void scanCustomMarkers();
 
 private:
     QTextEdit*                  m_editor;

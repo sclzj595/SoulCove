@@ -1,7 +1,11 @@
 #include "ui/remote/SshConfigPanel.h"
 #include "core/remote/SshClient.h"
+#include "core/remote/SftpClient.h"
 #include "core/remote/SshSessionManager.h"
+#include "core/remote/RemoteLspDeployer.h"
 #include "core/config/ThemeManager.h"
+#include "core/config/ConfigManager.h"
+#include "ui/dialog/ModernDialog.h"
 
 #include <QFormLayout>
 #include <QFileDialog>
@@ -190,8 +194,15 @@ void SshConfigPanel::setupUi()
     m_connectBtn->setCursor(Qt::PointingHandCursor);
     connect(m_connectBtn, &QPushButton::clicked, this, &SshConfigPanel::onConnectClicked);
 
+    // P3-M01 子项3: 部署 LSP 按钮
+    m_deployLspBtn = new QPushButton(tr("\u2191 部署 LSP"), rightWidget);
+    m_deployLspBtn->setObjectName(QStringLiteral("sshDeployLspBtn"));
+    m_deployLspBtn->setToolTip(tr("检测并部署 clangd 到远程主机"));
+    connect(m_deployLspBtn, &QPushButton::clicked, this, &SshConfigPanel::onDeployLspClicked);
+
     btnBar->addWidget(m_testBtn);
     btnBar->addWidget(m_saveBtn);
+    btnBar->addWidget(m_deployLspBtn);
     btnBar->addStretch();
     btnBar->addWidget(m_connectBtn);
 
@@ -328,6 +339,92 @@ void SshConfigPanel::onTestConnectionClicked()
 }
 
 // ============================================================
+// P3-M01 子项3: 部署 LSP 到远程
+// ============================================================
+
+void SshConfigPanel::onDeployLspClicked()
+{
+    SshConnectionConfig config = gatherConfig();
+    if (config.host.isEmpty() || config.username.isEmpty()) {
+        showStatus(tr("请填写主机地址和用户名"), true);
+        return;
+    }
+
+    m_deployLspBtn->setEnabled(false);
+    m_deployLspBtn->setText(tr("部署中..."));
+    showStatus(tr("正在连接远程主机..."), false);
+
+    // 建立 SSH + SFTP 连接
+    auto* client = new SshClient(this);
+    if (!client->connect(config)) {
+        showStatus(tr("连接失败: %1").arg(client->lastError()), true);
+        client->deleteLater();
+        m_deployLspBtn->setEnabled(true);
+        m_deployLspBtn->setText(tr("\u2191 部署 LSP"));
+        return;
+    }
+
+    SftpClient sftp(client);
+    if (!sftp.init()) {
+        showStatus(tr("SFTP 初始化失败: %1").arg(sftp.lastError()), true);
+        client->disconnect();
+        client->deleteLater();
+        m_deployLspBtn->setEnabled(true);
+        m_deployLspBtn->setText(tr("\u2191 部署 LSP"));
+        return;
+    }
+
+    // 1. 检测远程 clangd
+    RemoteLspDeployer deployer;
+    QString existing = deployer.checkClangdInstalled(*client);
+    if (!existing.isEmpty()) {
+        // 已安装：保存路径到会话配置（key: SSH/<name>/remoteClangdPath）
+        ConfigManager::instance().setValue(
+            QStringLiteral("SSH/%1/remoteClangdPath").arg(config.name), existing);
+        showStatus(tr("远程已安装 clangd: %1").arg(existing), false);
+        client->disconnect();
+        client->deleteLater();
+        m_deployLspBtn->setEnabled(true);
+        m_deployLspBtn->setText(tr("\u2191 部署 LSP"));
+        return;
+    }
+
+    // 2. 未安装：提示是否上传本地 clangd
+    int ret = ModernDialog::question(
+        this, tr("部署 LSP"),
+        tr("远程主机未检测到 clangd。\n是否上传本地 clangd 二进制到远程？\n\n"
+           "（部署目录：~/.local/share/scnb/clangd）"));
+    if (ret != ModernDialog::ROLE_ACCEPT) {
+        showStatus(tr("已取消部署"), false);
+        client->disconnect();
+        client->deleteLater();
+        m_deployLspBtn->setEnabled(true);
+        m_deployLspBtn->setText(tr("\u2191 部署 LSP"));
+        return;
+    }
+
+    // 3. 执行部署
+    QString err;
+    QString remotePath = deployer.deploy(*client, sftp, err);
+    if (remotePath.isEmpty()) {
+        showStatus(tr("部署失败: %1").arg(err), true);
+    } else {
+        // 4. 持久化远程 clangd 路径到会话配置
+        if (config.name.isEmpty()) {
+            config.name = QStringLiteral("%1@%2").arg(config.username, config.host);
+        }
+        ConfigManager::instance().setValue(
+            QStringLiteral("SSH/%1/remoteClangdPath").arg(config.name), remotePath);
+        showStatus(tr("部署成功: %1").arg(remotePath), false);
+    }
+
+    client->disconnect();
+    client->deleteLater();
+    m_deployLspBtn->setEnabled(true);
+    m_deployLspBtn->setText(tr("\u2191 部署 LSP"));
+}
+
+// ============================================================
 // 辅助方法
 // ============================================================
 
@@ -442,6 +539,7 @@ void SshConfigPanel::applyTheme()
         "QPushButton#sshConnectBtn { background: %9; color: #ffffff; border: none; font-weight: bold; padding: 6px 24px; }"
         "QPushButton#sshConnectBtn:hover { opacity: 0.88; }"
         "QPushButton#sshTestBtn { color: %9; }"
+        "QPushButton#sshDeployLspBtn { color: %9; }"
         "QPushButton#sshDeleteBtn { color: #c44; border-color: #553333; }"
         "QPushButton#sshDeleteBtn:hover { background: #442222; color: #f66; }"
         "QListWidget#sshConfigList { background: %7; color: %2; border: 1px solid %4; border-radius: 4px; }"

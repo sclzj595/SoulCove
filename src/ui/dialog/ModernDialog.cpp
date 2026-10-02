@@ -1,5 +1,6 @@
 #include "ui/dialog/ModernDialog.h"
 #include "core/config/ThemeManager.h"
+#include "core/i18n/I18nManager.h"  // P3-M05: 动态宽度按语言调整
 
 #include <QListWidget>
 #include <QScrollBar>
@@ -23,8 +24,16 @@ void ModernDialog::setupUI()
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
     setAttribute(Qt::WA_TranslucentBackground);
     setModal(true);
-    setFixedSize(420, 0);  // 高度由内容撑开，后续 adjustSize
-    setMinimumWidth(380);
+
+    // P3-M05: 对话框宽度根据当前语言动态调整（英文比中文偏宽，避免按钮文字截断）
+    // 中文 420px（紧凑），英文 480px（容纳更长按钮文本如 "Don't Save"）
+    int dialogWidth = 420;
+    QString curLang = I18nManager::instance().currentLanguage();
+    if (curLang == QStringLiteral("en_US")) {
+        dialogWidth = 480;
+    }
+    setFixedSize(dialogWidth, 0);  // 高度由内容撑开，后续 adjustSize
+    setMinimumWidth(dialogWidth - 40);
 
     // 主布局
     m_layout = new QVBoxLayout(this);
@@ -287,7 +296,8 @@ QPushButton* ModernDialog::createButton(const QString& text, ButtonRole role) co
 
     auto* btn = new QPushButton(text);
     btn->setCursor(Qt::PointingHandCursor);
-    btn->setMinimumWidth(70);
+    // P3-M05: 按钮最小宽度从 70 提升到 90，防止 "Don't Save" / "不保存" 切换时宽度跳变
+    btn->setMinimumWidth(90);
     btn->setStyleSheet(style);
     btn->setAttribute(Qt::WA_Hover, true);
     return btn;

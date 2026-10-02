@@ -30,6 +30,10 @@ public:
     /// 设置远程根路径（如 "/home/user"）
     void setRootPath(const QString& path);
 
+    /// P3-M01 子项1: 设置当前会话名（用于 RemoteFileCache 隔离）
+    /// 必须在 setSftpClient 之后调用，影响后续打开文件的缓存归属
+    void setSessionName(const QString& sessionName) { m_sessionName = sessionName; }
+
     /// 刷新当前目录
     void refresh();
 
@@ -49,6 +53,7 @@ private slots:
 private:
     SftpClient* m_sftp = nullptr;
     QString m_rootPath;
+    QString m_sessionName;  ///< P3-M01 子项1: 当前会话名（缓存归属）
 
     /// 加载指定路径的子目录到指定 tree item
     void loadDir(const QString& path, QTreeWidgetItem* parentItem);

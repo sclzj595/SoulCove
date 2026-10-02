@@ -109,6 +109,13 @@ private:
     void applySgrFormat(const QStringList& params);
     static QColor ansiColorToQColor(int code, bool foreground = true);
 
+    // P2-H01: 终端输出语法高亮（命令/错误/日志着色）
+    // 在 parseAnsiData 插入文本后调用，对刚插入的文本范围应用 shell 模式匹配着色
+    // 不破坏 ANSI 已有着色（仅对默认前景色的文本应用高亮）
+    // @param text 刚插入的纯文本（用于模式匹配定位）
+    // @param startPos 文本在文档中的起始位置
+    void highlightShellPatterns(const QString& text, int startPos);
+
     // 可执行文件颜色高亮（ls/dir 输出中 .exe/.dll 等显示绿色）
     bool isExecutableFile(const QString& text) const;
     static const QStringList s_executableExtensions;

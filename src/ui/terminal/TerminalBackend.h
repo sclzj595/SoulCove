@@ -61,6 +61,14 @@ public:
     /// @brief 获取当前 shell 类型
     ShellType shellType() const { return m_shellType; }
 
+    // ========== P2-H01: 引用计数（终端复用/克隆）==========
+    /// @brief 增加引用计数（克隆标签页时调用）
+    void addRef();
+    /// @brief 减少引用计数，归零时自动销毁（关闭标签页时调用）
+    void release();
+    /// @brief 当前引用计数
+    int refCount() const { return m_refCount; }
+
 signals:
     /// @brief stdout 有新数据可读
     void readyReadStandardOutput(const QByteArray& data);
@@ -80,6 +88,7 @@ private:
 
     std::unique_ptr<QProcess> m_process;  // RAII：智能指针管理
     ShellType m_shellType = ShellType::CMD;
+    int m_refCount = 1;  // P2-H01: 引用计数（创建者持有1，克隆时 addRef，关闭时 release）
 };
 
 #endif // TERMINALBACKEND_H

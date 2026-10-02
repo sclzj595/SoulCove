@@ -24,6 +24,8 @@ public:
     QPushButton* openButton() const { return m_btnOpen; }
     QPushButton* saveButton() const { return m_btnSave; }
     QPushButton* settingsButton() const { return m_btnSettings; }
+    /// P3-M05: 视图菜单按钮（含语言切换子菜单）
+    QPushButton* viewButton() const { return m_btnView; }
 
     /// 获取窗口控制按钮
     QPushButton* minimizeButton() const { return m_btnMinimize; }
@@ -45,6 +47,15 @@ signals:
     void saveRequested();       // 保存文件（菜单触发）
     void refreshRequested();
     void quitRequested();
+    // P2-H04: 工作区持久化菜单信号
+    void saveWorkspaceRequested();  // 保存工作区到 .scnb-workspace 文件
+    void openWorkspaceRequested();  // 从 .scnb-workspace 文件打开工作区
+    // P3-M01 子项4: 挂载远程工作区（文件菜单触发）
+    void mountRemoteWorkspaceRequested();
+
+    // P3-M05: 国际化语言切换信号
+    /// 语言切换请求 — 参数为语言代码（"zh_CN" / "en_US" / "system"）
+    void languageChangeRequested(const QString& langCode);
 
 protected:
     /// @brief 右键上下文菜单事件
@@ -59,6 +70,7 @@ private:
     QPushButton* m_btnNew;
     QPushButton* m_btnOpen;
     QPushButton* m_btnSave;
+    QPushButton* m_btnView;      ///< P3-M05: 视图菜单按钮
     QPushButton* m_btnSettings;
 
     // 窗口控制

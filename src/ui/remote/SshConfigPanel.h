@@ -40,6 +40,7 @@ private slots:
     void onSavedSelectionChanged();
     void onAuthMethodChanged(int index);
     void onTestConnectionClicked();
+    void onDeployLspClicked();   // P3-M01 子项3: 部署 LSP 到远程
 
 private:
     void setupUi();
@@ -72,6 +73,7 @@ private:
     QPushButton*   m_testBtn = nullptr;
     QPushButton*   m_saveBtn = nullptr;
     QPushButton*   m_connectBtn = nullptr;
+    QPushButton*   m_deployLspBtn = nullptr;  // P3-M01 子项3: 部署 LSP 到远程
 
     // 状态提示
     QLabel*        m_statusLabel = nullptr;

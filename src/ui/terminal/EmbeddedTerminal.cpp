@@ -233,13 +233,118 @@ QString EmbeddedTerminal::currentTerminalType() const
 }
 
 // ============================================================
+// P2-H01: 终端复用 / 编辑器联动
+// ============================================================
+
+TerminalBackend* EmbeddedTerminal::currentBackend() const
+{
+    int idx = m_tabBar->currentIndex();
+    auto it = m_sessions.find(idx);
+    if (it != m_sessions.end()) {
+        return it.value().backend;
+    }
+    return nullptr;
+}
+
+void EmbeddedTerminal::attachExistingBackend(TerminalBackend* backend, const QString& tabTitle)
+{
+    if (!backend) return;
+
+    backend->addRef();
+
+    m_sessionCounter++;
+    QString baseTitle = tabTitle.isEmpty()
+                            ? tr("%1 (clone)").arg(m_sessionCounter)
+                            : tabTitle;
+
+    TerminalSession session;
+    session.name = baseTitle;
+    session.type = currentTerminalType();
+    session.backend = backend;
+
+    // === 页面容器 ===
+    session.pageWidget = new QWidget(m_sessionStack);
+    auto* pageLayout = new QVBoxLayout(session.pageWidget);
+    pageLayout->setContentsMargins(4, 4, 4, 4);
+    pageLayout->setSpacing(0);
+
+    // === 统一视图（输入输出合一）===
+    session.view = new TerminalView(session.pageWidget);
+    session.view->setObjectName(QStringLiteral("terminalOutput"));
+    pageLayout->addWidget(session.view, 1);
+
+    session.view->installEventFilter(this);
+
+    m_sessionStack->addWidget(session.pageWidget);
+
+    int index = m_tabBar->addTab(baseTitle);
+    m_sessions[index] = session;
+    m_tabBar->setCurrentIndex(index);
+
+    // 连接已有后端信号到新视图
+    setupClonedSession(session, backend);
+
+    applyTheme();
+
+    emit tabCountChanged(m_tabBar->count());
+}
+
+void EmbeddedTerminal::setupClonedSession(TerminalSession& session, TerminalBackend* backend)
+{
+    const auto& palette = ThemeManager::instance().currentPalette();
+
+    session.view->showWelcome(
+        tr("=== 克隆终端 ===\n共享同一个 shell 会话\n\n"),
+        palette.accentPrimary);
+
+    // stdout 数据 → 视图渲染（与原标签页共享同一后端输出）
+    connect(backend, &TerminalBackend::readyReadStandardOutput,
+            session.view, &TerminalView::appendOutput);
+
+    // stderr 数据 → 视图渲染（红色标识错误输出）
+    connect(backend, &TerminalBackend::readyReadStandardError,
+            session.view, [view = session.view](const QByteArray& data) {
+        view->appendPlainText(QString::fromLocal8Bit(data), QColor(255, 100, 100));
+    });
+
+    // 进程退出 → 视图显示状态
+    const QColor exitErrorColor = palette.errorColor;
+    const QColor exitNormalColor = palette.accentPrimary;
+    connect(backend, &TerminalBackend::finished,
+            session.view, [view = session.view, exitErrorColor, exitNormalColor](int code, bool crashed) {
+        QColor color = crashed ? exitErrorColor : exitNormalColor;
+        view->showWelcome(
+            crashed ? tr("\n[终端异常退出]\n") : tr("\n[终端已退出 (%1)]\n").arg(code),
+            color);
+    });
+
+    // 用户提交命令 → 后端执行（与原标签页共享输入通道）
+    connect(session.view, &TerminalView::commandSubmitted,
+            backend, [backend](const QString& cmd) {
+        if (!cmd.isEmpty()) {
+            backend->write((cmd + "\r\n").toLocal8Bit());
+        } else {
+            backend->write("\r\n");
+        }
+    });
+
+    // 中断请求 → 后端发送 Ctrl+C
+    connect(session.view, &TerminalView::interruptRequested,
+            backend, &TerminalBackend::sendInterrupt);
+
+    session.view->focusInputEnd();
+    session.view->setFocus();
+}
+
+// ============================================================
 // 会话管理（使用 TerminalBackend）
 // ============================================================
 
 void EmbeddedTerminal::setupSession(TerminalSession& session)
 {
     // 创建后端进程
-    session.backend = new TerminalBackend(this);
+    // P2-H01: 不设父对象，由引用计数管理生命周期（release() 在 refCount=0 时 delete this）
+    session.backend = new TerminalBackend(nullptr);
 
     // 确定后端 shell 类型
     TerminalBackend::ShellType shellType = (session.type == QStringLiteral("powershell"))
@@ -313,8 +418,10 @@ void EmbeddedTerminal::setupSession(TerminalSession& session)
 void EmbeddedTerminal::cleanupSession(TerminalSession& session)
 {
     if (session.backend) {
-        session.backend->stop();
-        delete session.backend;
+        // P2-H01: 使用引用计数管理生命周期
+        // release() 会在引用计数归零时自动 stop() 并销毁 backend
+        // 共享 backend 的其他标签页仍可正常使用
+        session.backend->release();
         session.backend = nullptr;
     }
 }
@@ -657,6 +764,20 @@ void EmbeddedTerminal::contextMenuEvent(QContextMenuEvent* event)
     QAction* actNewTerm = menu.addAction(tr("新建终端      Ctrl+Shift+`"));
     connect(actNewTerm, &QAction::triggered, this, [this]() {
         addTerminalTab(currentTerminalType());
+    });
+
+    // P2-H01: 克隆当前终端（共享同一 shell 会话到新标签页）
+    QAction* actCloneTerm = menu.addAction(tr("克隆当前终端"));
+    actCloneTerm->setEnabled(session.backend != nullptr && session.backend->isRunning());
+    connect(actCloneTerm, &QAction::triggered, this, [this, sessionName = session.name]() {
+        TerminalBackend* backend = currentBackend();
+        if (backend) {
+            // 克隆标签标题 = 原标签名 + " (clone)" 后缀
+            QString cloneTitle = sessionName.isEmpty()
+                                     ? QString()
+                                     : sessionName + QStringLiteral(" (clone)");
+            attachExistingBackend(backend, cloneTitle);
+        }
     });
 
     menu.addSeparator();

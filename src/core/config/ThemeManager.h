@@ -61,6 +61,38 @@ struct ThemePalette {
     QColor scrollbarHandle;     // 滚动条手柄
     QColor scrollbarHandleHover;// 滚动条手柄悬浮
 
+    // P1-2: 语法高亮配色（纳入主题管理，支持主题热切换）
+    // 编辑器与 Markdown 预览共享同一套配色，消除视觉割裂
+    struct SyntaxColors {
+        QColor keyword;         // 关键字 (int, const, static...)
+        QColor control;         // 控制流 (if, for, while, return...)
+        QColor type;            // 类型 (class, struct, enum, namespace...)
+        QColor string;          // 字符串
+        QColor number;          // 数字
+        QColor comment;         // 注释
+        QColor function;        // 函数调用
+        QColor funcDecl;        // 函数声明（LSP 语义，斜体）
+        QColor preprocessor;    // 预处理指令 (#define, #include)
+        QColor builtin;         // 内置类型/函数
+        QColor decorator;       // 装饰器/注解
+        QColor constant;        // 常量 (true, false, nullptr)
+        QColor tag;             // HTML/XML 标签
+        QColor typeDef;         // 类型定义（LSP 语义）
+        QColor memberVar;       // 成员变量（LSP 语义）
+        QColor localVar;        // 局部变量（LSP 语义）
+        QColor yamlKey;         // YAML 键名
+        QColor tomlKey;         // TOML 键名
+        QColor tomlSection;     // TOML 段落头
+        QColor doxy;            // P3: Doxygen 标签 (@brief/@param/@return...)
+        QColor todo;            // P4: TODO/FIXME/NOTE 待办标记
+        QColor headerPath;      // Bug1: #include 头文件路径（区别于普通字符串，可点击跳转）
+    } syntax;
+
+    /// 初始化为 VSCode Dark+ 配色（暗色主题用）
+    void initSyntaxDark();
+    /// 初始化为 GitHub Light 配色（亮色主题用）
+    void initSyntaxLight();
+
     /// 生成完整QSS样式表
     QString generateQSS() const;
 };

@@ -6,6 +6,9 @@
 #include <QStackedWidget>
 #include <QString>
 #include <QMap>
+#include <QDateTime>
+#include <QTimer>
+#include <QSet>
 
 #include "interfaces/ui/ITabWidget.h"
 
@@ -21,6 +24,7 @@ struct TabData {
     bool isSpecial = false;  // 特殊标签页（设置/MD预览等，不可编辑）
     MyTextEdit* editor = nullptr;  // 该标签页对应的编辑器实例
     QWidget*    customWidget = nullptr; // 自定义Widget（设置页/MD分屏等）
+    // R4: 闲置检测已提取到 IdleTabTracker，TabData 不再包含 LSP 相关字段
 };
 
 /// @brief VSCode风格编辑器标签页栏组件
@@ -54,7 +58,8 @@ public:
 
     /// @brief 获取所有已打开的编辑器实例（用于全局应用配置，如字体大小）
     /// @return 编辑器指针列表（仅包含 MyTextEdit，不含自定义 Widget 标签）
-    QList<MyTextEdit*> allEditors() const;
+    /// R3: 重命名避免与 ITabWidget::allEditors() 接口冲突
+    QList<MyTextEdit*> allMyTextEditors() const;
 
     /// @brief 添加Markdown分屏标签页
     /// @param filePath 文件路径
@@ -97,6 +102,10 @@ public:
     /// @brief 设置当前标签页的文件路径（另存为后更新）
     void setCurrentFilePath(const QString& path) override;
 
+    /// R3: 获取所有已打开标签页的 (filePath, editor) 列表
+    /// 实现 ITabWidget 接口，供 LspCoordinator 遍历编辑器进行状态路由
+    QList<QPair<QString, IEditorEdit*>> allEditors() const override;
+
     /// @brief 获取当前标签页数据
     const TabData* currentTabData() const;
 
@@ -131,6 +140,11 @@ signals:
     /// @brief 请求保存指定编辑器（关闭标签时用户选择保存）
     void saveRequested(MyTextEdit* editor);
 
+    /// @brief 文件标签页关闭（通知 LSP 发送 didClose 释放文档）
+    void fileClosed(const QString& filePath);
+
+    // R4: 闲置检测信号已移到 IdleTabTracker（fileIdleTimeout/fileReactivated）
+
 private slots:
     void onTabChanged(int index);
     void onTabCloseRequested(int index);
@@ -154,6 +168,8 @@ private:
     QStackedWidget* m_editorStack;   // 编辑器堆栈，每个tab对应一个editor
     QMap<int, TabData> m_tabDataMap;  // 索引→标签数据
     int m_untitledCounter = 0;        // 未命名文件计数器
+
+    // R4: 闲置检测已提取到 IdleTabTracker，EditorTabBar 不再持有定时器
 
     // 拖拽状态
     bool m_dragging = false;           // 是否正在拖拽标签

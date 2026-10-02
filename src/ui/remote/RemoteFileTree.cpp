@@ -1,5 +1,6 @@
 #include "ui/remote/RemoteFileTree.h"
 #include "core/remote/SftpClient.h"
+#include "core/remote/RemoteFileCache.h"
 #include "ui/dialog/ModernDialog.h"
 #include "Logger.hpp"
 
@@ -11,6 +12,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QFont>
+#include <QDateTime>
 
 // 数据角色约定（与 SideBar 保持一致）：
 //   Qt::UserRole       → 远程完整路径（占位子节点存 "placeholder"，加载标记存 "loaded"）
@@ -203,7 +205,28 @@ void RemoteFileTree::onItemDoubleClicked(QTreeWidgetItem* item, int column)
     QString remotePath = itemPath(item);
     if (remotePath.isEmpty()) return;
 
-    // 下载到本地临时目录
+    // P3-M01 子项1: 优先查询缓存
+    // 1. 获取远程文件 mtime（用于一致性校验）
+    QDateTime remoteMtime = m_sftp->fileMtime(remotePath);
+    if (remoteMtime.isValid()) {
+        QByteArray cached = RemoteFileCache::instance().get(remotePath, remoteMtime);
+        if (!cached.isEmpty()) {
+            // 缓存命中：直接落盘到临时文件供编辑器打开
+            QString localTempPath = QDir::tempPath() + QStringLiteral("/") +
+                                    QFileInfo(remotePath).fileName();
+            QFile f(localTempPath);
+            if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                f.write(cached);
+                f.close();
+                LOG_INFO("[RemoteFileTree] 缓存命中，跳过 SFTP 下载:" << remotePath);
+                emit fileDownloaded(remotePath, localTempPath);
+                emit fileOpenRequested(remotePath);
+                return;
+            }
+        }
+    }
+
+    // 缓存未命中或失效：SFTP 下载
     QString localTempPath = QDir::tempPath() + QStringLiteral("/") +
                             QFileInfo(remotePath).fileName();
     if (!m_sftp->download(remotePath, localTempPath)) {
@@ -214,6 +237,21 @@ void RemoteFileTree::onItemDoubleClicked(QTreeWidgetItem* item, int column)
     }
 
     LOG_INFO("[RemoteFileTree] 文件已下载到临时目录:" << localTempPath);
+
+    // P3-M01 子项1: 写入缓存（若 mtime 有效且文件不大）
+    if (remoteMtime.isValid()) {
+        QFile localFile(localTempPath);
+        if (localFile.open(QIODevice::ReadOnly)) {
+            QByteArray content = localFile.readAll();
+            localFile.close();
+            // 仅缓存 < 16MB 的文件，避免占用过多内存
+            const qint64 kMaxInMemorySize = 16 * 1024 * 1024;
+            if (content.size() <= kMaxInMemorySize) {
+                RemoteFileCache::instance().put(remotePath, remoteMtime,
+                                                content.size(), content, m_sessionName);
+            }
+        }
+    }
 
     // 发出信号：主窗口可据此打开本地临时文件
     emit fileDownloaded(remotePath, localTempPath);

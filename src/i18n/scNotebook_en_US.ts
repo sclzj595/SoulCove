@@ -108,10 +108,6 @@
         <translation>Source Control</translation>
     </message>
     <message>
-        <source>Extensions</source>
-        <translation>Extensions</translation>
-    </message>
-    <message>
         <source>Welcome</source>
         <translation>Welcome</translation>
     </message>
@@ -737,6 +733,63 @@
     <message>
         <source>提示</source>
         <translation>Notice</translation>
+    </message>
+</context>
+<context>
+    <name>TitleBar</name>
+    <message>
+        <source>视图</source>
+        <translation>View</translation>
+    </message>
+    <message>
+        <source>(V)</source>
+        <translation>(V)</translation>
+    </message>
+    <message>
+        <source>视图与语言切换</source>
+        <translation>View and language switching</translation>
+    </message>
+    <message>
+        <source>语言</source>
+        <translation>Language</translation>
+    </message>
+    <message>
+        <source>简体中文</source>
+        <translation>Simplified Chinese</translation>
+    </message>
+    <message>
+        <source>English</source>
+        <translation>English</translation>
+    </message>
+    <message>
+        <source>跟随系统</source>
+        <translation>Follow System</translation>
+    </message>
+</context>
+<context>
+    <name>Widget</name>
+    <message>
+        <source>语言已切换，需要重启应用以完全生效</source>
+        <translation>Language has been switched. Restart the application to fully apply the change.</translation>
+    </message>
+    <message>
+        <source>当前时间</source>
+        <translation>Current time</translation>
+    </message>
+    <message>
+        <source>提示</source>
+        <translation>Notice</translation>
+    </message>
+</context>
+<context>
+    <name>ExplorerPanel</name>
+    <message>
+        <source>修改时间</source>
+        <translation>Modified</translation>
+    </message>
+    <message>
+        <source>大小</source>
+        <translation>Size</translation>
     </message>
 </context>
 </TS>

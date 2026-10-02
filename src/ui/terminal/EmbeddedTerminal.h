@@ -62,6 +62,16 @@ public:
     /// 获取当前终端类型
     QString currentTerminalType() const;
 
+    /// @brief P2-H01: 获取当前活动终端的后端（用于编辑器联动发送命令）
+    /// @return 当前标签页的 TerminalBackend 指针，无活动标签时返回 nullptr
+    TerminalBackend* currentBackend() const;
+
+    /// @brief P2-H01: 附加已存在的后端到新标签页（终端复用/克隆）
+    /// 不创建新进程，而是让新标签页共享传入的 backend（同一 shell 会话）
+    /// @param backend 已存在的终端后端（引用计数会自动 +1）
+    /// @param tabTitle 标签页标题（空则自动生成带 (clone) 后缀的标题）
+    void attachExistingBackend(TerminalBackend* backend, const QString& tabTitle = QString());
+
 signals:
     /// 终端标签页数量变化
     void tabCountChanged(int count);
@@ -91,6 +101,9 @@ private:
     // 会话管理
     void setupSession(TerminalSession& session);
     void cleanupSession(TerminalSession& session);
+
+    // P2-H01: 克隆会话 — 将已有 backend 的信号连接到新视图（共享终端）
+    void setupClonedSession(TerminalSession& session, TerminalBackend* backend);
 
     // UI 组件
     QWidget*        m_tabBarContainer = nullptr;  // 标签栏容器（含TabBar + 新建按钮）
