@@ -4,6 +4,7 @@
 #include "core/i18n/I18nManager.h"  // P3-M05: 语言切换
 #include "core/shortcut/ShortcutManager.h"  // T7: 快捷键管理器
 #include "core/build/QtDetector.h"          // P1 C05-3: Qt 安装检测器
+#include "core/plugin/PluginManager.h"      // M7: 插件管理
 #include "ui/snippet/SnippetManagerDialog.h"  // P2-H02 子项1: 代码片段管理对话框
 #include "ui/shortcut/KeySequenceEdit.h"    // P2-H05 子项3: 按键录制输入框
 
@@ -102,6 +103,7 @@ void SettingsPage::setupUI()
     m_categoryList->addItem(tr("LSP 语言服务器"));
     m_categoryList->addItem(tr("构建配置"));   // P1 C05-2
     m_categoryList->addItem(tr("Markdown"));   // P3-M02 子项2
+    m_categoryList->addItem(tr("插件"));       // M7: 插件管理
     m_categoryList->setCurrentRow(0);
 
     navLayout->addWidget(m_categoryList);
@@ -154,6 +156,10 @@ void SettingsPage::setupUI()
     auto* markdownPage = new QWidget();
     createMarkdownPage(markdownPage);
 
+    // M7: 插件管理页
+    auto* pluginsPage = new QWidget();
+    createPluginsPage(pluginsPage);
+
     m_pageStack->addWidget(appearancePage);
     m_pageStack->addWidget(editorPage);
     m_pageStack->addWidget(terminalPage);
@@ -167,6 +173,7 @@ void SettingsPage::setupUI()
     m_pageStack->addWidget(lspPage);
     m_pageStack->addWidget(buildPage);
     m_pageStack->addWidget(markdownPage);
+    m_pageStack->addWidget(pluginsPage);
 
     // 用滚动区域包裹
     auto* scrollArea = new QScrollArea(this);
@@ -2819,4 +2826,104 @@ void SettingsPage::onImportConfig()
 
     emit configChanged();
     ModernDialog::information(this, tr("导入成功"), tr("配置已成功导入"));
+}
+
+// ============================================================
+// M7: 插件管理页
+// ============================================================
+
+void SettingsPage::createPluginsPage(QWidget* page)
+{
+    auto* layout = new QVBoxLayout(page);
+    layout->setContentsMargins(28, 24, 28, 24);
+    layout->setSpacing(12);
+
+    auto* titleLabel = new QLabel(tr("插件管理"), page);
+    titleLabel->setObjectName(QStringLiteral("settingsTitle"));
+    layout->addWidget(titleLabel);
+
+    auto* hint = new QLabel(
+        tr("已加载的插件清单。插件以动态库形式放置于应用目录 plugins/ 下，启动时自动加载。"
+           "插件可通过 IPluginAPI 注册命令（命令面板 Ctrl+Shift+P 可触发）"), page);
+    hint->setObjectName(QStringLiteral("settingsHint"));
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
+
+    // 摘要行（x/y 成功 + 重新扫描按钮）
+    auto* summaryLayout = new QHBoxLayout();
+    m_pluginSummaryLabel = new QLabel(tr("尚未扫描插件"), page);
+    m_pluginSummaryLabel->setObjectName(QStringLiteral("settingsHint"));
+    m_pluginRescanBtn = new QPushButton(tr("重新扫描"), page);
+    m_pluginRescanBtn->setObjectName(QStringLiteral("btnResetSection"));
+    m_pluginRescanBtn->setFixedWidth(90);
+    summaryLayout->addWidget(m_pluginSummaryLabel, 1);
+    summaryLayout->addWidget(m_pluginRescanBtn);
+    layout->addLayout(summaryLayout);
+
+    // 插件清单表：名称 / 版本 / 状态 / 描述
+    m_pluginTable = new QTableWidget(page);
+    m_pluginTable->setColumnCount(4);
+    m_pluginTable->setHorizontalHeaderLabels(QStringList()
+        << tr("名称") << tr("版本") << tr("状态") << tr("描述"));
+    m_pluginTable->horizontalHeader()->setStretchLastSection(true);
+    m_pluginTable->setColumnWidth(0, 200);
+    m_pluginTable->setColumnWidth(1, 80);
+    m_pluginTable->setColumnWidth(2, 110);
+    m_pluginTable->verticalHeader()->setVisible(false);
+    m_pluginTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_pluginTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_pluginTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_pluginTable->setAlternatingRowColors(true);
+    layout->addWidget(m_pluginTable, 1);
+
+    connect(m_pluginRescanBtn, &QPushButton::clicked,
+            this, &SettingsPage::onRescanPlugins);
+
+    refreshPluginTable();
+}
+
+void SettingsPage::refreshPluginTable()
+{
+    if (!m_pluginTable) return;
+
+    const auto& records = PluginManager::instance().plugins();
+    int okCount = 0;
+
+    m_pluginTable->setRowCount(records.size());
+    for (int i = 0; i < records.size(); ++i) {
+        const auto& rec = records.at(i);
+        if (rec.initialized) ++okCount;
+
+        m_pluginTable->setItem(i, 0, new QTableWidgetItem(rec.name));
+        m_pluginTable->setItem(i, 1, new QTableWidgetItem(rec.version));
+
+        QTableWidgetItem* statusItem = nullptr;
+        if (rec.initialized) {
+            statusItem = new QTableWidgetItem(tr("已启用"));
+            statusItem->setForeground(QColor(78, 201, 176));   // 绿（与 blame 调色板一致）
+        } else if (rec.instance) {
+            statusItem = new QTableWidgetItem(tr("初始化失败"));
+            statusItem->setForeground(QColor(244, 71, 71));    // 红
+        } else {
+            statusItem = new QTableWidgetItem(tr("加载失败"));
+            statusItem->setForeground(QColor(244, 71, 71));
+            statusItem->setToolTip(rec.error);
+        }
+        m_pluginTable->setItem(i, 2, statusItem);
+
+        QString desc = rec.description;
+        if (!rec.error.isEmpty()) desc += QStringLiteral("（错误: ") + rec.error + QStringLiteral("）");
+        m_pluginTable->setItem(i, 3, new QTableWidgetItem(desc));
+    }
+
+    m_pluginSummaryLabel->setText(tr("已加载 %1 / %2 个插件")
+                                  .arg(okCount).arg(records.size()));
+}
+
+void SettingsPage::onRescanPlugins()
+{
+    // loadPlugins 内部有去重保护（同一路径只加载一次），重复点击安全；
+    // 仅会拾取新增到 plugins/ 目录的插件动态库
+    PluginManager::instance().loadPlugins();
+    refreshPluginTable();
 }

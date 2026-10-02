@@ -33,7 +33,8 @@ public:
         Shortcuts = 4,
         LSP = 5,
         Build = 6,      // P1 C05-2: 构建配置页
-        Markdown = 7    // P3-M02 子项2: Markdown 自定义 CSS 配置页
+        Markdown = 7,   // P3-M02 子项2: Markdown 自定义 CSS 配置页
+        Plugins = 8     // M7: 插件管理页
     };
     Q_ENUM(SettingsCategory)
 
@@ -107,6 +108,8 @@ private slots:
     void onMdCssApplyClicked();
     void onMdCssImportClicked();
     void onMdCssResetClicked();
+    // M7: 插件管理页槽函数
+    void onRescanPlugins();
 
 private:
     void setupUI();
@@ -118,7 +121,11 @@ private:
     void createLspPage(QWidget* page);
     void createBuildPage(QWidget* page);  // P1 C05-2: 构建配置页
     void createMarkdownPage(QWidget* page);  // P3-M02 子项2: Markdown 自定义 CSS 配置页
+    void createPluginsPage(QWidget* page);   // M7: 插件管理页
     void createShortcutsPage();
+
+    /// M7: 刷新插件表格（从 PluginManager 读取当前加载清单）
+    void refreshPluginTable();
 
     /// P1 C05-3: 自动检测系统已安装的 Qt 版本
     /// 扫描所有盘符根目录下的 \Qt\<版本>\<编译器> 目录，
@@ -223,6 +230,11 @@ private:
     QPushButton*    m_mdCssApplyBtn = nullptr; ///< 应用按钮
     QPushButton*    m_mdCssImportBtn = nullptr;///< 从文件导入 CSS
     QPushButton*    m_mdCssResetBtn = nullptr; ///< 重置（清空用户 CSS，使用主题预设）
+
+    // === M7: 插件管理 ===
+    QTableWidget* m_pluginTable = nullptr;       ///< 插件清单表
+    QLabel*       m_pluginSummaryLabel = nullptr;///< 加载摘要（x/y 成功）
+    QPushButton*  m_pluginRescanBtn = nullptr;   ///< 重新扫描按钮
 
     /// 快捷键数据结构
     struct ShortcutItem {
