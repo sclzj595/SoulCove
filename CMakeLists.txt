@@ -327,6 +327,11 @@ set(SOURCES
     # ===== core/workspace/ 工作区层（P2-H04 多文件夹工作区）=====
     src/core/workspace/WorkspaceManager.cpp   # 工作区管理器（单例，.scnb-workspace 持久化）
 
+    # ===== core/plugin/ 插件系统（M7 四件套：Manager/Loader/API + IPlugin 接口）=====
+    src/core/plugin/PluginManager.cpp         # 插件管理器（单例，扫描/加载/初始化/收口）
+    src/core/plugin/PluginLoader.cpp          # 插件加载器（QPluginLoader RAII 包装）
+    src/core/plugin/PluginAPI.cpp             # 插件 API 实现（日志/命令注册/数据目录）
+
     # ===== interfaces/ 接口层（MOC触发文件）=====
     src/interfaces/remote/ISshClient.cpp      # ISshClient MOC触发（纯接口类信号需要MOC）
     src/interfaces/remote/ISftpClient.cpp     # ISftpClient MOC触发（SFTP客户端抽象接口）
@@ -448,6 +453,20 @@ target_link_libraries(scNotebook PRIVATE scCore)
 # P3-M05: scNotebook 同样嵌入 .qm 翻译资源（:/i18n/）
 qt6_add_translations(scNotebook
     TS_FILES ${TS_FILES}
+)
+
+# ====== M7 插件系统：示例插件（动态库，输出到 <运行目录>/plugins/）======
+# 插件以 MODULE（动态库）构建，运行时由 PluginManager 经 QPluginLoader 扫描加载。
+# 使用生成器表达式跟随 scIDE 的实际输出目录（兼容多构建目录 Debug/Release 分离），
+# 保证 plugins/ 与应用可执行文件同级（PluginManager 默认扫描路径）。
+add_library(hello_plugin MODULE
+    src/plugins/hello/HelloPlugin.cpp
+)
+target_link_libraries(hello_plugin PRIVATE Qt6::Core)
+set_target_properties(hello_plugin PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:scIDE>/plugins"
+    LIBRARY_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:scIDE>/plugins"
+    ARCHIVE_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:scIDE>/plugins"
 )
 
 # Windows平台:复制运行时依赖的Qt动态库到输出目录

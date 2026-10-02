@@ -14,6 +14,7 @@
 #include "controller/EditorActions.h"
 #include "controller/FileController.h"
 #include "controller/LspCoordinator.h"
+#include "core/plugin/PluginManager.h"  // M7: 插件系统（命令注册表注入）
 #include "controller/IdleTabTracker.h"  // R4: 闲置标签页追踪器
 #include "ui/settings/SettingsPage.h"
 #include "ui/tools/DiffViewer.h"
@@ -3464,6 +3465,9 @@ void Widget::registerCommands()
     });
 
     LOG_INFO("[Widget] CommandRegistry 已注册" << m_commandRegistry.commandIds().size() << "个命令");
+
+    // M7: 将命令注册表注入插件系统（插件命令进入同一命令面板，统一触发入口）
+    PluginManager::instance().setCommandRegistry(&m_commandRegistry);
 }
 
 void Widget::onToggleCommandPalette()

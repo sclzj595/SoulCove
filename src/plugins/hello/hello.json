@@ -1,0 +1,5 @@
+{
+    "name": "com.soulcove.hello",
+    "version": "1.0.0",
+    "description": "SoulCove 示例插件（M7 插件系统联调用）：注册 plugin.hello.greet 命令"
+}

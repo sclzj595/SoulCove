@@ -8,6 +8,7 @@
 #include <QStandardPaths>
 #include "core/config/ConfigManager.h"
 #include "core/i18n/I18nManager.h"  // P3-M05: 国际化管理器
+#include "core/plugin/PluginManager.h"  // M7: 插件系统
 #include "Logger.hpp"
 
 /// @brief scIDE 产品入口 — 全功能集成开发环境
@@ -45,6 +46,15 @@ int main(int argc, char *argv[])
     // 使用 IDE 配置创建主窗口（全功能）
     Widget w(ProductConfig::ide());
     w.show();
+
+    // ====== M7: 插件系统加载（仅 IDE 产品线启用）======
+    // 扫描应用目录下 plugins/（CMake 已将示例插件 hello_plugin 输出至此），
+    // 加载并 initialize 全部插件；命令注册表由 Widget::registerCommands 注入。
+    PluginManager::instance().loadPlugins();
+    // 退出前逆序 shutdown 并卸载全部插件
+    QObject::connect(&a, &QCoreApplication::aboutToQuit, []() {
+        PluginManager::instance().shutdownAll();
+    });
 
     return a.exec();
 }
