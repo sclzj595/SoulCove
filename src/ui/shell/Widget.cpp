@@ -495,12 +495,7 @@ Widget::Widget(const ProductConfig& config, QWidget *parent)
     if (ConfigManager::instance().autoSave()) {
         m_autoSaveTimer = new QTimer(this);
         m_autoSaveTimer->setInterval(ConfigManager::instance().autoSaveInterval() * 1000);
-        connect(m_autoSaveTimer, &QTimer::timeout, this, [this]() {
-            if (m_currentTextEdit && m_currentTextEdit->isModified() && m_tabBar) {
-                QString path = m_tabBar->currentFilePath();
-                if (!path.isEmpty()) on_btnSave_clicked();
-            }
-        });
+        connect(m_autoSaveTimer, &QTimer::timeout, this, &Widget::onAutoSaveTimeout);
         m_autoSaveTimer->start();
     } else {
         m_autoSaveTimer = nullptr;
@@ -1594,6 +1589,19 @@ void Widget::on_btnOpen_clicked()
     // 通过 FileController 统一读取（自动编码检测）
     QString content = FileController::readFile(filename);
     m_tabBar->openFileTab(filename, content);
+}
+
+void Widget::onAutoSaveTimeout()
+{
+    // O31: 自动保存静默写盘 — 原走 on_btnSave_clicked() 每周期弹确认框，违背自动保存语义。
+    // 直接静默保存当前标签（无路径的未命名文件跳过，首次落盘仍由用户手动保存触发另存为）
+    if (m_currentTextEdit && m_currentTextEdit->isModified() && m_tabBar
+        && !m_tabBar->currentFilePath().isEmpty()) {
+        saveCurrentFileDirect();
+    }
+
+    // O31: 自动保存覆盖分离窗口（O24 跟踪体系复用，未命名文件同样跳过）
+    if (m_tabBar) m_tabBar->saveDetachedEditorsSilently();
 }
 
 void Widget::on_btnSave_clicked()
@@ -2787,12 +2795,7 @@ void Widget::onSettingsClicked()
                     // 此前开关需重启才生效 → 现场补建定时器
                     m_autoSaveTimer = new QTimer(this);
                     m_autoSaveTimer->setInterval(sec * 1000);
-                    connect(m_autoSaveTimer, &QTimer::timeout, this, [this]() {
-                        if (m_currentTextEdit && m_currentTextEdit->isModified() && m_tabBar) {
-                            QString path = m_tabBar->currentFilePath();
-                            if (!path.isEmpty()) on_btnSave_clicked();
-                        }
-                    });
+                    connect(m_autoSaveTimer, &QTimer::timeout, this, &Widget::onAutoSaveTimeout);
                     m_autoSaveTimer->start();
                 }
             }

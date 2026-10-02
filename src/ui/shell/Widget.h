@@ -84,6 +84,10 @@ public:
     void fontUp();
     void fontDown();
 
+    /// O31: 自动保存超时回调 — 当前标签静默直接保存 + 分离窗口静默覆盖
+    /// （原实现走 on_btnSave_clicked() 会每周期弹确认框，违背自动保存语义）
+    void onAutoSaveTimeout();
+
 protected:
     /// @brief 窗口关闭事件拦截（覆盖系统关闭，触发保存检查）
     void closeEvent(QCloseEvent* event) override;

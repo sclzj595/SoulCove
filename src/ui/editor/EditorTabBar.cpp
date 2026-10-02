@@ -21,10 +21,6 @@
 #include <QApplication>
 #include <QCursor>
 #include <QMouseEvent>
-#include <QMainWindow>
-#include <QApplication>
-#include <QCursor>
-#include <QMouseEvent>
 
 EditorTabBar::EditorTabBar(QWidget* parent)
     : QWidget(parent)
@@ -548,6 +544,25 @@ bool EditorTabBar::closeAllDetachedWindows()
         rec.window->close();  // WA_DeleteOnClose → destroyed → didClose + prune
     }
     return true;
+}
+
+int EditorTabBar::saveDetachedEditorsSilently()
+{
+    // O31: 自动保存覆盖分离窗口 — 有路径且有修改的编辑器静默写盘
+    // （saveDetachedRequested 对非空路径不弹对话框；未命名文件跳过，避免自动保存弹另存为打断用户）
+    int saved = 0;
+    for (const DetachedWindowRecord& rec : m_detachedWindows) {
+        if (!rec.window) continue;
+        MyTextEdit* ed = rec.editor ? qobject_cast<MyTextEdit*>(rec.editor.data()) : nullptr;
+        if (!ed && rec.customWidget) {
+            ed = rec.customWidget->findChild<MyTextEdit*>();
+        }
+        if (ed && ed->isModified() && !rec.filePath.isEmpty()) {
+            emit saveDetachedRequested(ed, rec.filePath);
+            ++saved;
+        }
+    }
+    return saved;
 }
 
 bool EditorTabBar::closeTab(int index)

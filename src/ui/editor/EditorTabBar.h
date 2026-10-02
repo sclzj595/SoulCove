@@ -139,6 +139,10 @@ public:
     /// @return false = 用户在保存确认中取消，调用方应中止关闭流程
     bool closeAllDetachedWindows();
 
+    /// O31: 自动保存覆盖分离窗口 — 有路径且有修改的编辑器静默写盘
+    /// @return 本轮实际发起保存的窗口数（未命名文件跳过，避免自动保存弹另存为）
+    int saveDetachedEditorsSilently();
+
 signals:
     /// @brief 当前编辑器变更信号（用于重新连接补全器等）
     void currentEditorChanged(MyTextEdit* editor);
