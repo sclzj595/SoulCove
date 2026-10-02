@@ -550,6 +550,11 @@ void LspClient::onServerFinished(int exitCode, QProcess::ExitStatus exitStatus)
     Q_UNUSED(exitStatus)
 
     m_initialized = false;
+    // O18: 退出时明确记录被丢弃的 pending 请求（配合 P0 C01 超时机制，上层不会悬挂等待）
+    if (!m_pendingRequests.isEmpty()) {
+        LOG_DEBUG_S("LspClient", "onServerFinished",
+                    "服务器退出，丢弃未完成请求 " << m_pendingRequests.size() << " 个");
+    }
     m_pendingRequests.clear();
     m_symbolRequestUri.clear();  // V2.1 C1: 进程退出时清理请求跟踪表
     m_timeoutTimers.clear();     // P0 C01: 清理超时定时器

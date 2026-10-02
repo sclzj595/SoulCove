@@ -46,6 +46,16 @@ public:
     /// 用于 LspCoordinator 遍历编辑器进行状态路由，消除 dynamic_cast 向下转型
     /// @return (文件路径, 编辑器接口) 列表，特殊标签页（无文件）的路径为空
     virtual QList<QPair<QString, IEditorEdit*>> allEditors() const = 0;
+
+    /// O19: 按文件路径查找编辑器（路径比较做 NativeSeparators 归一化）
+    /// 默认实现返回 nullptr；实现类可用内部索引/映射提供 O(1)~O(n) 无分配查找，
+    /// 避免调用方每次 allEditors() 构造 QList 拷贝
+    /// @return 匹配的编辑器接口，未找到返回 nullptr
+    virtual IEditorEdit* editorForPath(const QString& filePath) const
+    {
+        Q_UNUSED(filePath)
+        return nullptr;
+    }
 };
 
 #endif // ITABWIDGET_H

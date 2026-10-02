@@ -197,13 +197,10 @@ MyTextEdit* LspCoordinator::findEditorByPath(const QString& filePath) const
 {
     if (!m_tabBar || filePath.isEmpty()) return nullptr;
 
-    // R3: 使用 ITabWidget::allEditors() 接口遍历，消除 dynamic_cast 向下转型
-    for (const auto& pair : m_tabBar->allEditors()) {
-        if (QDir::toNativeSeparators(pair.first) ==
-            QDir::toNativeSeparators(filePath)) {
-            // IEditorEdit 实现类是 MyTextEdit，用 dynamic_cast 安全转换
-            return dynamic_cast<MyTextEdit*>(pair.second);
-        }
+    // O19: 使用 ITabWidget::editorForPath 直接查找，避免每次 allEditors() 构造 QList 拷贝
+    if (auto* ed = m_tabBar->editorForPath(filePath)) {
+        // IEditorEdit 实现类是 MyTextEdit，用 dynamic_cast 安全转换
+        return dynamic_cast<MyTextEdit*>(ed);
     }
     return nullptr;
 }

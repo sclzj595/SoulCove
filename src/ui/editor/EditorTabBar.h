@@ -106,6 +106,10 @@ public:
     /// 实现 ITabWidget 接口，供 LspCoordinator 遍历编辑器进行状态路由
     QList<QPair<QString, IEditorEdit*>> allEditors() const override;
 
+    /// O19: 按文件路径查找编辑器（直接遍历 m_tabDataMap，无 QList 拷贝分配）
+    /// 路径比较做 NativeSeparators 归一化，供 LspCoordinator 高频 LSP 响应路由使用
+    IEditorEdit* editorForPath(const QString& filePath) const override;
+
     /// @brief 获取当前标签页数据
     const TabData* currentTabData() const;
 

@@ -631,6 +631,21 @@ QList<QPair<QString, IEditorEdit*>> EditorTabBar::allEditors() const
     return result;
 }
 
+// O19: 按文件路径查找编辑器 — 直接遍历 m_tabDataMap，避免每次调用 allEditors()
+// 构造 QList 拷贝；路径比较做 NativeSeparators 归一化（与 LspCoordinator 原逻辑一致）
+IEditorEdit* EditorTabBar::editorForPath(const QString& filePath) const
+{
+    if (filePath.isEmpty()) return nullptr;
+    const QString want = QDir::toNativeSeparators(filePath);
+    for (auto it = m_tabDataMap.constBegin(); it != m_tabDataMap.constEnd(); ++it) {
+        const TabData& data = it.value();
+        if (data.editor && QDir::toNativeSeparators(data.filePath) == want) {
+            return data.editor;
+        }
+    }
+    return nullptr;
+}
+
 const TabData* EditorTabBar::currentTabData() const
 {
     int idx = m_tabBar->currentIndex();

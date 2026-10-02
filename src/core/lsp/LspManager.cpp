@@ -565,7 +565,7 @@ QStringList LspManager::serverArgs(const QString& langId, const QString& project
         args << QStringLiteral("--background-index");
         // P0-1: --query-driver 精确指定 MinGW 编译器路径，消除 "driver clang not found in PATH" 警告
         //       原通配符 ** 不稳定，改为检测实际编译器路径
-        // L2: detectCompilerDriver 结果缓存在 m_cachedDriverPath，避免重复读取 compile_commands.json
+        // L2/O21: detectCompilerDriver 结果按 projectRoot 隔离缓存，避免重复读取 compile_commands.json
         QString driverPath = detectCompilerDriver(projectRoot);
         if (!driverPath.isEmpty()) {
             args << QStringLiteral("--query-driver=") + driverPath;
@@ -613,12 +613,13 @@ QStringList LspManager::serverArgs(const QString& langId, const QString& project
 /// L2: 检测 MinGW 编译器路径，用于 clangd --query-driver
 /// 优先级：compile_commands.json 中的编译器 > Qt Tools MinGW > 系统 PATH
 /// L1: projectRoot 用于查找 compile_commands.json（不依赖 m_workspaceRoot）
-/// L2: 结果缓存在 m_cachedDriverPath，避免每次 serverArgs 都重新读取 compile_commands.json
+/// L2/O21: 结果按 projectRoot 隔离缓存，避免多项目下编译驱动相互覆盖
 QString LspManager::detectCompilerDriver(const QString& projectRoot) const
 {
-    // L2: 缓存命中 — 避免每次启动都重新读取 compile_commands.json 和遍历候选路径
-    if (!m_cachedDriverPath.isEmpty()) {
-        return m_cachedDriverPath;
+    // L2/O21: 缓存命中（按 projectRoot 查找）— 避免重复读取 compile_commands.json 和遍历候选路径
+    auto cacheIt = m_driverCacheByProject.constFind(projectRoot);
+    if (cacheIt != m_driverCacheByProject.constEnd()) {
+        return cacheIt.value();
     }
 
     // 1. 从 compile_commands.json 提取编译器路径（最准确）
@@ -644,7 +645,7 @@ QString LspManager::detectCompilerDriver(const QString& projectRoot) const
                             if (compiler.startsWith('"') && compiler.endsWith('"'))
                                 compiler = compiler.mid(1, compiler.length() - 2);
                             if (QFileInfo::exists(compiler)) {
-                                m_cachedDriverPath = compiler;  // L2: 缓存结果
+                                m_driverCacheByProject[projectRoot] = compiler;  // L2/O21: 按项目缓存
                                 return compiler;
                             }
                         }
@@ -664,7 +665,7 @@ QString LspManager::detectCompilerDriver(const QString& projectRoot) const
     };
     for (const QString& path : kMingwCandidates) {
         if (QFileInfo::exists(path)) {
-            m_cachedDriverPath = path;  // L2: 缓存结果
+            m_driverCacheByProject[projectRoot] = path;  // L2/O21: 按项目缓存
             return path;
         }
     }
@@ -672,7 +673,7 @@ QString LspManager::detectCompilerDriver(const QString& projectRoot) const
     // 3. 从 PATH 查找 g++
     QString pathGpp = QStandardPaths::findExecutable(QStringLiteral("g++"));
     if (!pathGpp.isEmpty()) {
-        m_cachedDriverPath = pathGpp;  // L2: 缓存结果
+        m_driverCacheByProject[projectRoot] = pathGpp;  // L2/O21: 按项目缓存
         return pathGpp;
     }
 

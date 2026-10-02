@@ -5,6 +5,7 @@
 #include "core/lsp/LspTypes.h"  // R1: LspHighlightState 枚举（信号类型安全）
 
 #include <QObject>
+#include <QHash>
 #include <QMap>
 #include <QString>
 #include <QStringList>
@@ -146,7 +147,8 @@ private:
 
     /// P0-1: 检测 MinGW 编译器路径，用于 clangd --query-driver
     /// L1: projectRoot 用于查找 compile_commands.json（不依赖 m_workspaceRoot）
-    /// L2: 结果缓存在 m_cachedDriverPath，避免重复读取 compile_commands.json
+    /// L2: 结果缓存避免重复读取 compile_commands.json
+    /// O21: 缓存按 projectRoot 隔离（多项目/多工作区下不同项目的编译驱动可能不同）
     QString detectCompilerDriver(const QString& projectRoot) const;
 
     /// 自动检测系统中的语言服务器路径（PATH 搜索 + 常见安装路径）
@@ -209,7 +211,8 @@ private:
     ISshClient*     m_remoteSshClient = nullptr;  ///< 远程 SSH 客户端（stdio over SSH 通道用）
 
     /// L2: 缓存检测到的编译器驱动路径，避免每次 serverArgs 都重新读取 compile_commands.json
-    mutable QString m_cachedDriverPath;
+    /// L2/O21: 编译驱动缓存按 projectRoot 隔离，避免多项目下相互覆盖
+    mutable QHash<QString, QString> m_driverCacheByProject;
 
     /// P0-2: 关闭标志（析构时置 true，阻止自动重连）
     bool m_shuttingDown = false;
