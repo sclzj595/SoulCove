@@ -406,6 +406,9 @@ QString HoverPopup::highlightCppCode(const QString& code) const
     escaped.replace(todoRegex, QStringLiteral("<span class=\"cpp-todo\">\\1</span>"));
 
     // C++ 关键字
+    // O9: 关键字/类型高亮正则预编译为 static 列表 — 原实现在每次调用时对
+    // 80+ 关键字逐个构造 QRegularExpression（一次 hover 弹窗 ~200 次正则编译），
+    // 现改为首次调用时一次性构建、后续直接复用
     static const QStringList keywords = {
         QStringLiteral("class"), QStringLiteral("struct"), QStringLiteral("public"),
         QStringLiteral("private"), QStringLiteral("protected"), QStringLiteral("virtual"),
@@ -425,10 +428,20 @@ QString HoverPopup::highlightCppCode(const QString& code) const
         QStringLiteral("noexcept"), QStringLiteral("final"), QStringLiteral("sizeof"),
         QStringLiteral("alignof"), QStringLiteral("decltype")
     };
-    // 用单词边界匹配每个关键字
-    for (const QString& kw : keywords) {
-        QRegularExpression re(QStringLiteral("\\b") + QRegularExpression::escape(kw) + QStringLiteral("\\b"));
-        escaped.replace(re, QStringLiteral("<span class=\"cpp-keyword\">") + kw + QStringLiteral("</span>"));
+    // 用单词边界匹配每个关键字（O9: 预编译正则复用）
+    static const QList<QRegularExpression> keywordRegexes = [] {
+        QList<QRegularExpression> list;
+        list.reserve(keywords.size());
+        for (const QString& kw : keywords) {
+            list.append(QRegularExpression(QStringLiteral("\\b")
+                       + QRegularExpression::escape(kw) + QStringLiteral("\\b")));
+        }
+        return list;
+    }();
+    for (int i = 0; i < keywordRegexes.size(); ++i) {
+        escaped.replace(keywordRegexes.at(i),
+                        QStringLiteral("<span class=\"cpp-keyword\">") + keywords.at(i)
+                        + QStringLiteral("</span>"));
     }
 
     // 常见类型（大写开头或常见类型名）
@@ -460,10 +473,21 @@ QString HoverPopup::highlightCppCode(const QString& code) const
         QStringLiteral("std::string"), QStringLiteral("std::vector"), QStringLiteral("std::map"),
         QStringLiteral("std::shared_ptr"), QStringLiteral("std::unique_ptr"), QStringLiteral("std::function")
     };
-    for (const QString& ty : types) {
+    // O9: 类型高亮正则同样预编译复用
+    static const QList<QRegularExpression> typeRegexes = [] {
+        QList<QRegularExpression> list;
+        list.reserve(types.size());
+        for (const QString& ty : types) {
+            list.append(QRegularExpression(QStringLiteral("\\b")
+                       + QRegularExpression::escape(ty) + QStringLiteral("\\b")));
+        }
+        return list;
+    }();
+    for (int i = 0; i < typeRegexes.size(); ++i) {
         // 跳过已经被 span 包裹的内容（简单处理：直接替换，已在 span 内的不会被二次匹配因为 &lt; 等）
-        QRegularExpression re(QStringLiteral("\\b") + QRegularExpression::escape(ty) + QStringLiteral("\\b"));
-        escaped.replace(re, QStringLiteral("<span class=\"cpp-type\">") + ty + QStringLiteral("</span>"));
+        escaped.replace(typeRegexes.at(i),
+                        QStringLiteral("<span class=\"cpp-type\">") + types.at(i)
+                        + QStringLiteral("</span>"));
     }
 
     return escaped;

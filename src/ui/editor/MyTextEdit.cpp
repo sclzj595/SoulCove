@@ -1359,7 +1359,12 @@ QChar MyTextEdit::matchingBracket(const QChar& ch)
 
 int MyTextEdit::findMatchingBracket(int position) const
 {
-    QString text = toPlainText();
+    return findMatchingBracket(position, toPlainText());
+}
+
+// O16: 新增带文本参数重载 — 扫描使用调用方提供的文本，不再自行拷贝全文档
+int MyTextEdit::findMatchingBracket(int position, const QString& text) const
+{
     if (position < 0 || position >= text.length()) return -1;
 
     QChar ch = text.at(position);
@@ -1405,21 +1410,24 @@ void MyTextEdit::highlightMatchingBracket()
     QTextCursor cursor = textCursor();
     int pos = cursor.position();
 
-    QString text = toPlainText();
+    // O16: 用 QTextDocument::characterAt 做 O(1) 字符检测，代替 toPlainText()
+    // 全文档拷贝 — 原实现在每次光标移动时都会拷贝整篇文档（百万行场景下开销巨大），
+    // 而绝大多数时候光标并不在括号上；仅在确认光标紧邻括号后才做一次文本拷贝用于扫描
+    const int docLen = document()->characterCount();
 
     // 光标可能在括号字符上，也可能在括号后面（刚输入完）
     // 检查光标位置的字符
     int bracketPos = -1;
-    if (pos > 0 && pos <= text.length()) {
+    if (pos > 0 && pos <= docLen) {
         // 检查光标前一个字符（处理刚输入完括号的场景）
-        QChar prevCh = text.at(pos - 1);
+        QChar prevCh = document()->characterAt(pos - 1);
         if (isBracketChar(prevCh)) {
             bracketPos = pos - 1;
         }
     }
     // 如果前面不是，检查当前位置的字符
-    if (bracketPos == -1 && pos < text.length()) {
-        QChar curCh = text.at(pos);
+    if (bracketPos == -1 && pos < docLen) {
+        QChar curCh = document()->characterAt(pos);
         if (isBracketChar(curCh)) {
             bracketPos = pos;
         }
@@ -1431,8 +1439,8 @@ void MyTextEdit::highlightMatchingBracket()
         return;
     }
 
-    // 查找配对位置
-    int matchPos = findMatchingBracket(bracketPos);
+    // 查找配对位置（仅此时才拷贝文本一次，O16）
+    int matchPos = findMatchingBracket(bracketPos, toPlainText());
     if (matchPos == -1) {
         // 没有配对，仅高亮当前括号
         setExtraSelections(extraSelections());

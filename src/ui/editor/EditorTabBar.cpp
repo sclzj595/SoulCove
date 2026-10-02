@@ -697,16 +697,24 @@ void EditorTabBar::remapTabData()
 {
     // 关闭标签后 QTabBar 会自动重新索引，但 m_tabDataMap 的键仍是旧索引
     // 正确做法：通过 widget 指针匹配来重建映射
+    // O10: 预建 widget→stackIndex 哈希，整体复杂度从 O(n²·indexOf) 降为 O(n)
+    QHash<QWidget*, int> stackIndexByWidget;
+    stackIndexByWidget.reserve(m_editorStack->count());
+    for (int i = 0; i < m_editorStack->count(); ++i) {
+        if (QWidget* w = m_editorStack->widget(i)) {
+            stackIndexByWidget[w] = i;
+        }
+    }
+
     QMap<int, TabData> newDataMap;
-    for (int i = 0; i < m_tabBar->count(); ++i) {
-        // 遍历旧 map 找到对应的 TabData
-        for (auto it = m_tabDataMap.begin(); it != m_tabDataMap.end(); ++it) {
-            const TabData& data = it.value();
-            QWidget* widget = data.customWidget ? data.customWidget
-                                                : static_cast<QWidget*>(data.editor);
-            if (widget && m_editorStack->indexOf(widget) == i) {
-                newDataMap[i] = data;
-                break;
+    for (auto it = m_tabDataMap.begin(); it != m_tabDataMap.end(); ++it) {
+        const TabData& data = it.value();
+        QWidget* widget = data.customWidget ? data.customWidget
+                                            : static_cast<QWidget*>(data.editor);
+        if (widget) {
+            auto found = stackIndexByWidget.constFind(widget);
+            if (found != stackIndexByWidget.constEnd()) {
+                newDataMap[found.value()] = data;
             }
         }
     }

@@ -1,4 +1,6 @@
 #include "core/editor/CodeFoldingManager.h"
+
+#include <algorithm>
 #include "core/config/ThemeManager.h"
 
 #include <QTextEdit>
@@ -167,18 +169,30 @@ const CodeFoldingManager::FoldRegion* CodeFoldingManager::findFoldRegionConst(in
 
 void CodeFoldingManager::applyFoldState()
 {
-    // 遍历所有折叠区域，隐藏/显示块
+    // O13: 折叠可见性扫描优化 — 原实现为 O(块数 × 折叠区域数) 的双重遍历，
+    // 折叠区域多时（大文件连续折叠）单次切换可达百万次比较。
+    // 改为排序 + 单次扫描（O(B log R + B + R)）：维护已启动折叠区域的最大结束行，
+    // 块号 ≤ maxEnd 即被折叠覆盖（区间重叠下单调正确）。
+    QList<const FoldRegion*> folded;
+    folded.reserve(m_foldRegions.size());
+    for (const auto& region : m_foldRegions) {
+        if (region.folded) folded.append(&region);
+    }
+    std::sort(folded.begin(), folded.end(),
+              [](const FoldRegion* a, const FoldRegion* b) {
+                  return a->startBlock < b->startBlock;
+              });
+
     QTextBlock block = m_editor->document()->firstBlock();
+    int idx = 0;          // 下一个未处理的折叠区域
+    int maxEnd = -1;      // 已启动区域的最大结束块号
     while (block.isValid()) {
-        bool shouldHide = false;
-        for (const auto& region : m_foldRegions) {
-            if (region.folded && block.blockNumber() > region.startBlock &&
-                block.blockNumber() <= region.endBlock) {
-                shouldHide = true;
-                break;
-            }
+        const int bn = block.blockNumber();
+        while (idx < folded.size() && folded[idx]->startBlock < bn) {
+            maxEnd = qMax(maxEnd, folded[idx]->endBlock);
+            ++idx;
         }
-        block.setVisible(!shouldHide);
+        block.setVisible(bn > maxEnd);
         block = block.next();
     }
 

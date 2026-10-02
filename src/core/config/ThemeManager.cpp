@@ -62,12 +62,9 @@ void ThemeManager::switchTheme(const QString& key)
 
     qApp->setStyleSheet(fullQss);
 
-    // 强制所有控件重绘（解决切换深色/浅色后界面不刷新的问题）
-    for (QWidget* w : qApp->allWidgets()) {
-        w->style()->unpolish(w);
-        w->style()->polish(w);
-        w->update();
-    }
+    // O8: 移除手动遍历 allWidgets() 的 unpolish/polish/update 循环 —
+    // QApplication::setStyleSheet 本身会自动对所有已存在控件完成重_polish与重绘，
+    // 手动遍历在大窗口树（数千控件）下反而造成二次全量样式重算，是切主题卡顿的主因之一。
 
 #ifdef Q_OS_WIN
     // 修复：切换主题时同步 DWM 暗色模式到所有顶层窗口，

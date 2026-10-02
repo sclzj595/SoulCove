@@ -151,6 +151,8 @@ public:
     void highlightMatchingBracket();
     /// 查找指定位置的括号的配对位置（返回-1表示未找到）
     int findMatchingBracket(int position) const;
+    /// O16: 带文本参数的重载 — 调用方已持有 toPlainText() 结果时避免二次全文档拷贝
+    int findMatchingBracket(int position, const QString& text) const;
     /// 判断字符是否为括号字符
     static bool isBracketChar(const QChar& ch);
     /// 返回括号的配对字符

@@ -141,8 +141,13 @@ void MinimapRenderer::updateNow()
     double scaleY = static_cast<double>(h) / docHeight;
 
     // 创建缩略图
-    delete m_minimapImage;
-    m_minimapImage = new QImage(w, h, QImage::Format_RGB32);
+    // O12: 仅在尺寸变化时重建 QImage — 小缩略图滚动/文档更新时高频调用 updateNow()，
+    // 原实现每次 delete+new 造成高频堆分配与内存抖动
+    const QSize desiredSize(w, h);
+    if (!m_minimapImage || m_minimapImage->size() != desiredSize) {
+        delete m_minimapImage;
+        m_minimapImage = new QImage(desiredSize, QImage::Format_RGB32);
+    }
 
     // 使用主题编辑器背景色（适配亮/暗模式）
     const auto& themePalette = ThemeManager::instance().currentPalette();
