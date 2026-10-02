@@ -5,6 +5,9 @@
 #include "core/shortcut/ShortcutManager.h"  // T7: 快捷键管理器
 #include "core/build/QtDetector.h"          // P1 C05-3: Qt 安装检测器
 #include "core/plugin/PluginManager.h"      // M7: 插件管理
+#include "core/ai/AIProviderStore.h"        // M8: AI 服务商配置仓库
+#include "core/ai/AIClient.h"               // M8: 测试连接
+#include <QUuid>                            // M8: 新增服务商 id
 #include "ui/snippet/SnippetManagerDialog.h"  // P2-H02 子项1: 代码片段管理对话框
 #include "ui/shortcut/KeySequenceEdit.h"    // P2-H05 子项3: 按键录制输入框
 
@@ -104,6 +107,7 @@ void SettingsPage::setupUI()
     m_categoryList->addItem(tr("构建配置"));   // P1 C05-2
     m_categoryList->addItem(tr("Markdown"));   // P3-M02 子项2
     m_categoryList->addItem(tr("插件"));       // M7: 插件管理
+    m_categoryList->addItem(tr("AI 助手"));    // M8: AI 服务商配置
     m_categoryList->setCurrentRow(0);
 
     navLayout->addWidget(m_categoryList);
@@ -160,6 +164,10 @@ void SettingsPage::setupUI()
     auto* pluginsPage = new QWidget();
     createPluginsPage(pluginsPage);
 
+    // M8: AI 助手配置页
+    auto* aiPage = new QWidget();
+    createAIPage(aiPage);
+
     m_pageStack->addWidget(appearancePage);
     m_pageStack->addWidget(editorPage);
     m_pageStack->addWidget(terminalPage);
@@ -168,12 +176,14 @@ void SettingsPage::setupUI()
     // 快捷键页面（独立创建，返回 QWidget 指针）
     // 注意：添加顺序必须与 m_categoryList 的项目顺序一致
     // 分类列表顺序：外观(0) 编辑器(1) 终端(2) 智能提示(3) 快捷键(4) LSP(5) 构建(6) Markdown(7)
+    //               插件(8) AI 助手(9)
     createShortcutsPage();
 
     m_pageStack->addWidget(lspPage);
     m_pageStack->addWidget(buildPage);
     m_pageStack->addWidget(markdownPage);
     m_pageStack->addWidget(pluginsPage);
+    m_pageStack->addWidget(aiPage);
 
     // 用滚动区域包裹
     auto* scrollArea = new QScrollArea(this);
@@ -2612,6 +2622,7 @@ void SettingsPage::filterSettings(const QString& keyword)
     QStringList lspKeywords = {tr("LSP"), tr("语言服务器"), tr("pylsp"), tr("clangd"), tr("补全"), tr("诊断")};
     QStringList buildKeywords = {tr("构建"), tr("CMake"), tr("Qt"), tr("OpenSSL"), tr("zlib"), tr("Debug"), tr("Release")};
     QStringList markdownKeywords = {tr("Markdown"), tr("CSS"), tr("样式"), tr("预览"), tr("mermaid")};
+    QStringList aiKeywords = {tr("AI"), tr("助手"), tr("模型"), tr("厂家"), tr("服务商"), tr("Key"), tr("密钥"), tr("大模型")};
 
     // Bug5: 批量更新 — 禁用更新期间的重绘，避免逐项 setHidden 触发多次布局/重绘导致白屏
     m_categoryList->setUpdatesEnabled(false);
@@ -2628,6 +2639,7 @@ void SettingsPage::filterSettings(const QString& keyword)
         case 5: keywords = &lspKeywords; break;
         case 6: keywords = &buildKeywords; break;
         case 7: keywords = &markdownKeywords; break;
+        case 9: keywords = &aiKeywords; break;   // M8: AI 助手
         }
 
         if (keywords) {
@@ -2955,4 +2967,277 @@ void SettingsPage::onRescanPlugins()
     // 仅会拾取新增到 plugins/ 目录的插件动态库
     PluginManager::instance().loadPlugins();
     refreshPluginTable();
+}
+
+// ============================================================
+// M8: AI 助手 — 服务商可视化配置面板（O34）
+// ============================================================
+
+void SettingsPage::createAIPage(QWidget* page)
+{
+    auto* layout = new QVBoxLayout(page);
+
+    // --- 服务商列表 ---
+    auto* listSection = new QLabel(tr("AI 服务商"), page);
+    listSection->setObjectName(QStringLiteral("settingsSectionTitle"));
+    layout->addWidget(listSection);
+
+    m_aiProviderTable = new QTableWidget(page);
+    m_aiProviderTable->setColumnCount(4);
+    m_aiProviderTable->setHorizontalHeaderLabels(
+        {tr("名称"), tr("厂家"), tr("模型"), tr("启用")});
+    m_aiProviderTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_aiProviderTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_aiProviderTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    m_aiProviderTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    m_aiProviderTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_aiProviderTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_aiProviderTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_aiProviderTable->setMinimumHeight(120);
+    m_aiProviderTable->verticalHeader()->setVisible(false);
+    layout->addWidget(m_aiProviderTable);
+
+    auto* btnRow = new QHBoxLayout();
+    m_aiAddBtn = new QPushButton(tr("新增"), page);
+    m_aiDeleteBtn = new QPushButton(tr("删除"), page);
+    m_aiSetActiveBtn = new QPushButton(tr("设为当前"), page);
+    m_aiTestBtn = new QPushButton(tr("测试连接"), page);
+    btnRow->addWidget(m_aiAddBtn);
+    btnRow->addWidget(m_aiDeleteBtn);
+    btnRow->addWidget(m_aiSetActiveBtn);
+    btnRow->addWidget(m_aiTestBtn);
+    btnRow->addStretch();
+    layout->addLayout(btnRow);
+
+    // --- 配置表单 ---
+    auto* formSection = new QLabel(tr("服务商配置"), page);
+    formSection->setObjectName(QStringLiteral("settingsSectionTitle"));
+    layout->addWidget(formSection);
+
+    auto addFormRow = [&layout, page](const QString& label, QWidget* w) {
+        auto* row = new QHBoxLayout();
+        auto* lb = new QLabel(label, page);
+        lb->setFixedWidth(120);
+        row->addWidget(lb);
+        row->addWidget(w, 1);
+        layout->addLayout(row);
+    };
+
+    m_aiVendorCombo = new QComboBox(page);
+    for (const auto& vp : AIProviderStore::vendorPresets()) {
+        m_aiVendorCombo->addItem(vp.vendor);
+    }
+    addFormRow(tr("厂家:"), m_aiVendorCombo);
+
+    m_aiNameEdit = new QLineEdit(page);
+    m_aiNameEdit->setPlaceholderText(tr("自定义显示名，如：我的智谱"));
+    addFormRow(tr("名称:"), m_aiNameEdit);
+
+    m_aiBaseUrlEdit = new QLineEdit(page);
+    m_aiBaseUrlEdit->setPlaceholderText(tr("OpenAI 兼容根地址，如 https://open.bigmodel.cn/api/paas/v4"));
+    addFormRow(tr("BaseUrl:"), m_aiBaseUrlEdit);
+
+    m_aiApiKeyEdit = new QLineEdit(page);
+    m_aiApiKeyEdit->setEchoMode(QLineEdit::Password);
+    m_aiApiKeyEdit->setPlaceholderText(tr("仅保存在本地 ai_providers.json"));
+    addFormRow(tr("API Key:"), m_aiApiKeyEdit);
+
+    m_aiModelEdit = new QLineEdit(page);
+    m_aiModelEdit->setPlaceholderText(tr("如 glm-4-flash / deepseek-chat / kimi-k2"));
+    addFormRow(tr("模型:"), m_aiModelEdit);
+
+    m_aiEnabledCheck = new QCheckBox(tr("启用（启用后才会出现在对话面板服务商下拉中）"), page);
+    m_aiEnabledCheck->setChecked(true);
+    layout->addWidget(m_aiEnabledCheck);
+
+    auto* saveRow = new QHBoxLayout();
+    m_aiSaveBtn = new QPushButton(tr("保存到选中项"), page);
+    saveRow->addWidget(m_aiSaveBtn);
+    saveRow->addStretch();
+    layout->addLayout(saveRow);
+
+    m_aiStatusLabel = new QLabel(QString(), page);
+    m_aiStatusLabel->setObjectName(QStringLiteral("settingsHint"));
+    m_aiStatusLabel->setWordWrap(true);
+    layout->addWidget(m_aiStatusLabel);
+
+    auto* hint = new QLabel(
+        tr("选择厂家自动填充 BaseUrl 与模型；所有兼容 OpenAI /chat/completions 协议的云服务均可接入。"
+           "配置持久化于用户目录 ai_providers.json（module.json 风格）。"), page);
+    hint->setObjectName(QStringLiteral("settingsHint"));
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
+
+    layout->addStretch();
+
+    // --- 信号 ---
+    connect(m_aiProviderTable, &QTableWidget::currentCellChanged,
+            this, &SettingsPage::onAiProviderRowChanged);
+    connect(m_aiAddBtn, &QPushButton::clicked, this, &SettingsPage::onAiAddClicked);
+    connect(m_aiDeleteBtn, &QPushButton::clicked, this, &SettingsPage::onAiDeleteClicked);
+    connect(m_aiSaveBtn, &QPushButton::clicked, this, &SettingsPage::onAiSaveClicked);
+    connect(m_aiSetActiveBtn, &QPushButton::clicked, this, &SettingsPage::onAiSetActiveClicked);
+    connect(m_aiTestBtn, &QPushButton::clicked, this, &SettingsPage::onAiTestClicked);
+
+    // 厂家切换 → 按预设填充 BaseUrl/模型（名称留空时一并生成默认名）
+    connect(m_aiVendorCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int idx) {
+        const auto presets = AIProviderStore::vendorPresets();
+        if (idx < 0 || idx >= presets.size()) return;
+        m_aiBaseUrlEdit->setText(presets[idx].baseUrl);
+        m_aiModelEdit->setText(presets[idx].model);
+    });
+
+    // 测试连接客户端（惰性创建）
+    refreshAiTable();
+}
+
+void SettingsPage::refreshAiTable(int selectRow)
+{
+    if (!m_aiProviderTable) return;
+    const auto& providers = AIProviderStore::instance().providers();
+    m_aiProviderTable->setRowCount(providers.size());
+    for (int i = 0; i < providers.size(); ++i) {
+        const AIProvider& p = providers[i];
+        m_aiProviderTable->setItem(i, 0, new QTableWidgetItem(p.name));
+        m_aiProviderTable->setItem(i, 1, new QTableWidgetItem(p.vendor));
+        m_aiProviderTable->setItem(i, 2, new QTableWidgetItem(p.model));
+        m_aiProviderTable->setItem(i, 3,
+            new QTableWidgetItem(p.enabled ? tr("是") : tr("否")));
+    }
+    if (selectRow >= 0 && selectRow < providers.size()) {
+        m_aiProviderTable->selectRow(selectRow);
+    }
+}
+
+void SettingsPage::onAiProviderRowChanged(int row)
+{
+    const auto& providers = AIProviderStore::instance().providers();
+    if (row < 0 || row >= providers.size()) return;
+    const AIProvider& p = providers[row];
+
+    QSignalBlocker blocker(m_aiVendorCombo);
+    int vIdx = m_aiVendorCombo->findText(p.vendor);
+    if (vIdx < 0) vIdx = m_aiVendorCombo->count() - 1;  // 自定义
+    m_aiVendorCombo->setCurrentIndex(vIdx);
+    m_aiNameEdit->setText(p.name);
+    m_aiBaseUrlEdit->setText(p.baseUrl);
+    m_aiApiKeyEdit->setText(p.apiKey);
+    m_aiModelEdit->setText(p.model);
+    m_aiEnabledCheck->setChecked(p.enabled);
+}
+
+void SettingsPage::onAiAddClicked()
+{
+    QList<AIProvider> providers = AIProviderStore::instance().providers();
+
+    AIProvider p;
+    p.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const auto presets = AIProviderStore::vendorPresets();
+    const int vIdx = qBound(0, m_aiVendorCombo->currentIndex(), presets.size() - 1);
+    p.vendor = presets[vIdx].vendor;
+    p.baseUrl = presets[vIdx].baseUrl;
+    p.model = presets[vIdx].model;
+    p.name = QStringLiteral("新服务商 %1").arg(providers.size() + 1);
+    p.enabled = true;
+    providers.append(p);
+
+    AIProviderStore::instance().setProviders(providers, p.id);  // 新增即设为当前
+    refreshAiTable(providers.size() - 1);
+    m_aiStatusLabel->setText(tr("已新增，填写表单后点「保存到选中项」"));
+}
+
+void SettingsPage::onAiDeleteClicked()
+{
+    const int row = m_aiProviderTable->currentRow();
+    QList<AIProvider> providers = AIProviderStore::instance().providers();
+    if (row < 0 || row >= providers.size()) {
+        m_aiStatusLabel->setText(tr("请先在列表中选中要删除的服务商"));
+        return;
+    }
+    providers.removeAt(row);
+    AIProviderStore::instance().setProviders(providers, AIProviderStore::instance().activeProviderId());
+    refreshAiTable(qMin(row, providers.size() - 1));
+    m_aiStatusLabel->setText(tr("已删除"));
+}
+
+void SettingsPage::onAiSaveClicked()
+{
+    const int row = m_aiProviderTable->currentRow();
+    QList<AIProvider> providers = AIProviderStore::instance().providers();
+    if (row < 0 || row >= providers.size()) {
+        m_aiStatusLabel->setText(tr("请先在列表中选中要保存的服务商（或先点「新增」）"));
+        return;
+    }
+
+    AIProvider& p = providers[row];
+    p.vendor = m_aiVendorCombo->currentText();
+    p.name = m_aiNameEdit->text().trimmed();
+    p.baseUrl = m_aiBaseUrlEdit->text().trimmed();
+    p.apiKey = m_aiApiKeyEdit->text().trimmed();
+    p.model = m_aiModelEdit->text().trimmed();
+    p.enabled = m_aiEnabledCheck->isChecked();
+
+    if (p.name.isEmpty()) p.name = QStringLiteral("服务商 %1").arg(row + 1);
+    if (p.baseUrl.isEmpty() || p.apiKey.isEmpty() || p.model.isEmpty()) {
+        m_aiStatusLabel->setText(tr("BaseUrl / API Key / 模型 均不能为空"));
+        return;
+    }
+
+    AIProviderStore::instance().setProviders(providers, AIProviderStore::instance().activeProviderId());
+    refreshAiTable(row);
+    m_aiStatusLabel->setText(tr("已保存：%1").arg(p.name));
+}
+
+void SettingsPage::onAiSetActiveClicked()
+{
+    const int row = m_aiProviderTable->currentRow();
+    QList<AIProvider> providers = AIProviderStore::instance().providers();
+    if (row < 0 || row >= providers.size()) {
+        m_aiStatusLabel->setText(tr("请先在列表中选中要设为当前的服务商"));
+        return;
+    }
+    if (!providers[row].enabled) {
+        m_aiStatusLabel->setText(tr("该服务商未启用，请先勾选启用并保存"));
+        return;
+    }
+    AIProviderStore::instance().setProviders(providers, providers[row].id);
+    refreshAiTable(row);
+    m_aiStatusLabel->setText(tr("当前服务商：%1").arg(providers[row].name));
+}
+
+void SettingsPage::onAiTestClicked()
+{
+    if (m_aiTestClient && m_aiTestClient->isBusy()) return;
+
+    // 直接用表单当前值测试（允许未保存先测）
+    AIProvider p;
+    p.vendor = m_aiVendorCombo->currentText();
+    p.name = m_aiNameEdit->text();
+    p.baseUrl = m_aiBaseUrlEdit->text().trimmed();
+    p.apiKey = m_aiApiKeyEdit->text().trimmed();
+    p.model = m_aiModelEdit->text().trimmed();
+
+    if (p.baseUrl.isEmpty() || p.apiKey.isEmpty() || p.model.isEmpty()) {
+        m_aiStatusLabel->setText(tr("请先填写 BaseUrl / API Key / 模型"));
+        return;
+    }
+
+    if (!m_aiTestClient) m_aiTestClient = new AIClient(this);
+    m_aiTestBtn->setEnabled(false);
+    m_aiStatusLabel->setText(tr("测试连接中…"));
+    connect(m_aiTestClient, &AIClient::finished, this, &SettingsPage::onAiTestFinished,
+            Qt::UniqueConnection);
+    m_aiTestClient->chatOnce(p,
+        { AIChatMessage{ QStringLiteral("user"), QStringLiteral("ping") } });
+}
+
+void SettingsPage::onAiTestFinished(bool ok, const QString& error)
+{
+    m_aiTestBtn->setEnabled(true);
+    if (ok) {
+        m_aiStatusLabel->setText(tr("连接成功，模型响应正常"));
+    } else {
+        m_aiStatusLabel->setText(tr("连接失败：") + error);
+    }
 }

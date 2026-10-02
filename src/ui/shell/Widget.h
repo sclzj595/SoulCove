@@ -35,6 +35,7 @@ class MyTextEdit;
 class IEditorEdit;
 class SettingsPage;
 class SshConfigPanel;
+class AIChatPanel;   // M8: AI 助手对话面板
 class DiffViewer;
 class GitPanel;
 class LspCoordinator;
@@ -109,6 +110,7 @@ private slots:
     void onCurrentIndexChanged(int index);
     void onSettingsClicked();
     void onSshConfigClicked();  // 打开SSH配置面板（标签页内嵌）
+    void onOpenAiChat();        // M8: 打开 AI 助手对话面板（标签页内嵌）
 
     // === 标签页联动 ===
     void onCurrentEditorChanged(MyTextEdit* editor);
@@ -290,6 +292,7 @@ private:
     EmbeddedTerminal* m_terminal;     // 内嵌终端
     SshTerminalWidget* m_sshTerminal = nullptr;  // SSH远程终端
     SshConfigPanel*  m_sshConfigPanel = nullptr;   // SSH配置面板（标签页内嵌）
+    AIChatPanel*     m_aiChatPanel = nullptr;      // M8: AI 助手对话面板（标签页内嵌）
     QWidget*         m_terminalPanel; // 终端面板容器（含面板标题栏）
     QSplitter*      m_vSplitter;      // 垂直分割器（编辑区/终端）
     bool            m_terminalVisible = false;

@@ -27,6 +27,8 @@
 #include "core/snippet/SnippetManager.h"
 #include "ui/snippet/SnippetManagerDialog.h"
 #include "ui/remote/SshConfigPanel.h"
+#include "ui/ai/AIChatPanel.h"                   // M8: AI 助手对话面板
+#include "core/ai/AIProviderStore.h"             // M8: 服务商配置变更联动
 #include "core/remote/SshSessionManager.h"      // P3-M01 子项4: 已保存会话列表
 #include "core/remote/SshClient.h"              // P3-M01 子项4: 建立连接挂载工作区
 #include "core/remote/SftpClient.h"             // P3-M01 子项4: SFTP 同步
@@ -196,6 +198,7 @@ Widget::Widget(const ProductConfig& config, QWidget *parent)
             this, [this](const QString& title) {
         if (title == tr("设置")) m_settingsPage = nullptr;
         if (title == tr("SSH 配置")) m_sshConfigPanel = nullptr;
+        if (title == tr("AI 助手")) m_aiChatPanel = nullptr;  // M8
         // 设置页关闭后，如果没有其他标签，恢复显示欢迎页
         if (m_welcomePage && m_tabBar && m_tabBar->tabCount() == 0) {
             m_welcomePage->show();
@@ -1151,6 +1154,13 @@ void Widget::registerShortcutCommands()
             }
             onSshConfigClicked();
         }));
+
+    // ===== M8: AI 助手 =====
+    filter.registerCommand(make_command(
+        QStringLiteral("ai.openChat"), tr("AI 助手：打开对话"), tr("AI"),
+        QKeySequence(),  // 不设默认快捷键，避免与既有键位冲突；命令面板 Ctrl+Shift+P 可达
+        QStringLiteral("global"),
+        [this]{ onOpenAiChat(); }));
 
     // ===== 全局命令 ====
     filter.registerCommand(make_command(
@@ -2835,6 +2845,36 @@ void Widget::onSshConfigClicked()
 
     // 在编辑器标签栏中打开（对标设置页面）
     m_tabBar->addCustomTab(m_sshConfigPanel, tr("SSH 配置"), true);
+}
+
+void Widget::onOpenAiChat()
+{
+    // M8: AI 助手对话面板（复用已有标签）
+    if (!m_aiChatPanel) {
+        m_aiChatPanel = new AIChatPanel();
+
+        // 回答「插入到编辑器」→ 写入当前编辑器光标处
+        connect(m_aiChatPanel, &AIChatPanel::insertToEditorRequested,
+                this, [this](const QString& text) {
+            auto* ed = qobject_cast<MyTextEdit*>(
+                m_currentTextEdit ? m_currentTextEdit->asWidget() : nullptr);
+            if (ed) ed->insertPlainText(text);
+        });
+
+        // 服务商配置变更（设置页保存）→ 刷新面板下拉（receiver 绑定面板，随销毁自动断开）
+        connect(&AIProviderStore::instance(), &AIProviderStore::providersChanged,
+                m_aiChatPanel, &AIChatPanel::refreshProviders);
+    }
+
+    // 已打开则切换过去
+    const int idx = m_tabBar->findCustomTabIndex(tr("AI 助手"));
+    if (idx >= 0) {
+        m_tabBar->switchToTab(idx);
+        return;
+    }
+
+    if (m_welcomePage) m_welcomePage->hide();
+    m_tabBar->addCustomTab(m_aiChatPanel, tr("AI 助手"), true);
 }
 
 void Widget::onOpenFolderRequested()

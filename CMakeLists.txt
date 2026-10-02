@@ -241,6 +241,9 @@ set(SOURCES
     # ===== ui/snippet/ 代码片段管理 UI 层（P2-H02）=====
     src/ui/snippet/SnippetManagerDialog.cpp   # 代码片段管理对话框（CRUD+导入导出+VSCode兼容）
 
+    # ===== ui/ai/ AI 助手 UI 层（M8）=====
+    src/ui/ai/AIChatPanel.cpp                 # AI 对话面板（标签页内嵌，SSE 流式渲染）
+
     # ===== ui/settings/ 设置层 =====
     src/ui/settings/SettingsPage.cpp          # 设置页面（标签页内嵌）
 
@@ -249,6 +252,10 @@ set(SOURCES
 
     # ===== ui/debug/ 调试视图层（P3-M04 子项3）=====
     src/ui/debug/DebugView.cpp                # 调试视图面板（变量表/调用栈/断点列表/工具栏）
+
+    # ===== core/ai/ AI 接入层（M8）=====
+    src/core/ai/AIProviderStore.cpp           # AI 服务商配置仓库（ai_providers.json，module.json 风格）
+    src/core/ai/AIClient.cpp                  # OpenAI 兼容协议客户端（SSE 流式/非流式）
 
     # ===== core/base/ 基础架构层 =====
     src/core/base/Subject.cpp                 # 观察者主题基类

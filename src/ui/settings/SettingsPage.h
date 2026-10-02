@@ -15,6 +15,7 @@
 #include <QTimer>
 
 class QPlainTextEdit;
+class AIClient;
 
 /// @brief 设置页面（标签页内嵌，对标VSCode设置面板）
 /// 左侧分类导航 + 右侧配置项卡片式布局
@@ -34,7 +35,8 @@ public:
         LSP = 5,
         Build = 6,      // P1 C05-2: 构建配置页
         Markdown = 7,   // P3-M02 子项2: Markdown 自定义 CSS 配置页
-        Plugins = 8     // M7: 插件管理页
+        Plugins = 8,    // M7: 插件管理页
+        AI = 9          // M8: AI 助手服务商配置页
     };
     Q_ENUM(SettingsCategory)
 
@@ -62,6 +64,14 @@ private slots:
     void onFormatToolPathClicked();                // M4
     void onAutoFormatJsonToggled(bool checked);    // M10
     void onSpellCheckToggled(bool checked);        // P3-M03 子项5: 拼写检查开关
+    // === M8: AI 服务商配置 ===
+    void onAiProviderRowChanged(int row);
+    void onAiAddClicked();
+    void onAiDeleteClicked();
+    void onAiSaveClicked();
+    void onAiSetActiveClicked();
+    void onAiTestClicked();
+    void onAiTestFinished(bool ok, const QString& error);
     void onTerminalTypeChanged(int index);
     void onTerminalFontChanged(int value);
     void onTerminalFontFamilyChanged(int index);
@@ -159,6 +169,24 @@ private:
     // === 编辑器配置 ===
     QCheckBox* m_autoSaveCheck;
     QSpinBox*  m_autoSaveIntervalSpin;  // O29: 自动保存间隔（秒）
+
+    // === M8: AI 服务商配置 ===
+    void createAIPage(QWidget* page);
+    void refreshAiTable(int selectRow = -1);
+    QTableWidget* m_aiProviderTable = nullptr;
+    QComboBox*    m_aiVendorCombo = nullptr;
+    QLineEdit*    m_aiNameEdit = nullptr;
+    QLineEdit*    m_aiBaseUrlEdit = nullptr;
+    QLineEdit*    m_aiApiKeyEdit = nullptr;
+    QLineEdit*    m_aiModelEdit = nullptr;
+    QCheckBox*    m_aiEnabledCheck = nullptr;
+    QPushButton*  m_aiAddBtn = nullptr;
+    QPushButton*  m_aiDeleteBtn = nullptr;
+    QPushButton*  m_aiSetActiveBtn = nullptr;
+    QPushButton*  m_aiTestBtn = nullptr;
+    QPushButton*  m_aiSaveBtn = nullptr;
+    QLabel*       m_aiStatusLabel = nullptr;
+    AIClient*     m_aiTestClient = nullptr;
     QCheckBox* m_lineNumbersCheck;
     QSpinBox*  m_tabSizeSpin;
     QComboBox* m_indentStyleCombo;       // M4: 缩进风格 (Spaces/Tabs)
