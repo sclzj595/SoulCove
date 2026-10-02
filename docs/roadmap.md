@@ -1,6 +1,6 @@
 # Roadmap
 
-This document describes the scNotebook release plan and the long-term
+This document describes the SoulCove release plan and the long-term
 development milestones.
 
 > Internal development versions V1.3 – V1.9 were consolidated into the first

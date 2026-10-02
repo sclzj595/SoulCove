@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Branding**: unified project naming to **SoulCove**. Documentation, README
+  and `Files/` history documents renamed from `scNotebook*` to `SoulCove*`.
+- Code-level identifiers (executables `scIDE.exe` / `scEditor.exe` /
+  `scNotebook.exe`, static lib `scCore`, i18n file names) are retained for
+  now; a code-level rename may follow in a future release.
+
 ## [v1.0.0] - 2026-07-04 — First Public Release
 
 First public open-source release. Internal development versions V1.3 – V1.9
@@ -42,7 +51,7 @@ were consolidated into this single 1.0.0 release.
   conflict detection), sidebar (Explorer / Search / Git / Outline / Tasks).
 - **Build system**: CMake with `find_package` Qt detection, conditional
   compilation (`SCNB_WITH_OPENSSL`, `SCNB_WITH_SSH`), `compile_commands.json`
-  export, three-product factory (scIDE / scEditor / scNotebook).
+  export, three-product factory (SoulCove IDE / SoulCove Notebook / SoulCove Notebook Lite).
 
 ## Release Plan
 

@@ -1,7 +1,7 @@
 # Architecture
 
 This document describes the layered architecture, design patterns and module
-layout of scNotebook.
+layout of SoulCove.
 
 ## Layered Architecture
 

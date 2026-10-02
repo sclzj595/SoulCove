@@ -1,11 +1,22 @@
-# Contributing to scNotebook
+# Contributing to SoulCove
 
-Thanks for your interest in contributing to scNotebook! This document explains
+Thanks for your interest in contributing to SoulCove! This document explains
 how to set up a development environment and submit changes.
 
 ## Getting Started
 
-1. **Fork** the repository and clone your fork.
+1. **Fork** the repository and clone your fork with submodules:
+
+   ```bash
+   git clone --recurse-submodules https://github.com/<your-username>/SoulCove.git
+   ```
+
+   If you already cloned without `--recurse-submodules`, initialize them:
+
+   ```bash
+   git submodule update --init --recursive
+   ```
+
 2. Make sure you have the build dependencies installed (see
    [README](README.md#build) and [docs/development.md](docs/development.md)).
 3. Create a feature branch:
@@ -67,7 +78,7 @@ fix(editor): prevent fold timer being shared across instances
 - Keep PRs focused — one logical change per PR.
 - For major changes, open an issue first to discuss the design.
 - Make sure the project builds cleanly in Release mode for all three products
-  (scIDE, scEditor, scNotebook).
+(SoulCove IDE, SoulCove Notebook, SoulCove Notebook Lite).
 - If your change affects user-visible strings, update the `.ts` translation
   files in `src/i18n/`.
 - Reference the issue number in the PR description (e.g. `Closes #42`).
@@ -75,7 +86,7 @@ fix(editor): prevent fold timer being shared across instances
 ## Reporting Bugs
 
 When opening an issue, include:
-- scNotebook version (or git commit).
+- SoulCove version (or git commit).
 - OS / compiler / Qt version.
 - Steps to reproduce.
 - Expected vs. actual behavior.
@@ -84,8 +95,8 @@ When opening an issue, include:
 
 ## Internationalization
 
-- Translation sources live in `src/i18n/scNotebook_zh_CN.ts` and
-  `scNotebook_en_US.ts`.
+- Translation sources live in `src/i18n/SoulCove_zh_CN.ts` and
+  `SoulCove_en_US.ts`.
 - Wrap every user-visible string with `tr()`.
 - `.ts` files are compiled to `.qm` and embedded into each product at build
   time via `qt6_add_translations`.

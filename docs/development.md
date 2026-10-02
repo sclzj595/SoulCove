@@ -1,7 +1,7 @@
 # Development Guide
 
 This document covers build configuration, coding conventions, debugging, LSP
-integration and shortcut reference for scNotebook contributors.
+integration and shortcut reference for SoulCove contributors.
 
 ## Build Requirements
 
