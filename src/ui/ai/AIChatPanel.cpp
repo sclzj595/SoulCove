@@ -154,9 +154,16 @@ AIProvider AIChatPanel::currentProvider() const
 
 void AIChatPanel::onSendClicked()
 {
-    if (m_streaming) return;
     const QString text = m_inputEdit->toPlainText().trimmed();
     if (text.isEmpty()) return;
+    m_inputEdit->clear();
+    sendAction(text, QString());
+}
+
+void AIChatPanel::sendAction(const QString& userText, const QString& contextBlock)
+{
+    if (m_streaming) return;
+    if (userText.trimmed().isEmpty()) return;
 
     const AIProvider p = currentProvider();
     if (p.id.isEmpty()) {
@@ -164,8 +171,12 @@ void AIChatPanel::onSendClicked()
         return;
     }
 
-    m_inputEdit->clear();
-    m_history.append({ QStringLiteral("user"), text });
+    // 上下文块直接并入 user 消息（一次请求可见全部，多轮时保留在历史中）
+    QString full = userText;
+    if (!contextBlock.trimmed().isEmpty()) {
+        full += QStringLiteral("\n\n") + contextBlock;
+    }
+    m_history.append({ QStringLiteral("user"), full });
     m_pendingAnswer.clear();
     m_streaming = true;
     m_dirty = true;

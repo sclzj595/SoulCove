@@ -29,6 +29,10 @@ public:
     /// 设置页保存服务商后调用（Widget 监听 AIProviderStore::providersChanged 转发）
     void refreshProviders();
 
+    /// M8 stage2: AI 动作入口（解释代码/修 Bug 等）。
+    /// 把 contextBlock 作为上下文与 userText 一起进入会话并立即发送（Widget 负责先打开面板）。
+    void sendAction(const QString& userText, const QString& contextBlock);
+
 signals:
     /// 请求把文本插入当前编辑器光标处（Widget 负责落点）
     void insertToEditorRequested(const QString& text);

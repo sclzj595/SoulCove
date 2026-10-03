@@ -1162,6 +1162,24 @@ void Widget::registerShortcutCommands()
         QStringLiteral("global"),
         [this]{ onOpenAiChat(); }));
 
+    // ===== M8 stage2: AI 动作（自动注入选区/文件上下文）=====
+    filter.registerCommand(make_command(
+        QStringLiteral("ai.explain"), tr("AI 助手：解释代码"), tr("AI"),
+        QKeySequence(), QStringLiteral("global"),
+        [this]{
+            if (!openAiAction(tr("请解释以下代码的功能、逻辑和潜在问题。"))) {
+                ModernDialog::information(this, tr("AI 助手"), tr("没有可用的代码上下文，请先打开文件（支持选区，未选中则发送整个文件）。"));
+            }
+        }));
+    filter.registerCommand(make_command(
+        QStringLiteral("ai.fixBug"), tr("AI 助手：修复 Bug"), tr("AI"),
+        QKeySequence(), QStringLiteral("global"),
+        [this]{
+            if (!openAiAction(tr("请分析以下代码中的 bug 或隐患，先给出问题清单，再给出修复后的完整代码。"))) {
+                ModernDialog::information(this, tr("AI 助手"), tr("没有可用的代码上下文，请先打开文件（支持选区，未选中则发送整个文件）。"));
+            }
+        }));
+
     // ===== 全局命令 ====
     filter.registerCommand(make_command(
         QStringLiteral("command.palette"), tr("命令面板"), tr("全局"),
@@ -2875,6 +2893,54 @@ void Widget::onOpenAiChat()
 
     if (m_welcomePage) m_welcomePage->hide();
     m_tabBar->addCustomTab(m_aiChatPanel, tr("AI 助手"), true);
+}
+
+// ===== M8 stage2: AI 动作（选区/文件上下文注入）=====
+
+QString Widget::buildAiContext() const
+{
+    auto* ed = qobject_cast<MyTextEdit*>(
+        m_currentTextEdit ? m_currentTextEdit->asWidget() : nullptr);
+    if (!ed) return QString();
+
+    // 文件信息：路径 + 后缀
+    const QString path = m_tabBar ? m_tabBar->currentFilePath() : QString();
+    const QString suffix = QFileInfo(path).suffix().toLower();
+
+    // 选区优先；selectedText 的段内换行是 U+2029，需替换回 '\n'
+    QString code = ed->textCursor().selectedText();
+    bool selection = !code.isEmpty();
+    if (selection) code.replace(QChar(0x2029), QChar('\n'));
+    else code = ed->toPlainText();
+
+    // 防爆量：截断到 12000 字符（约 3~4k token），首尾标注
+    constexpr int kMaxContextChars = 12000;
+    bool truncated = false;
+    if (code.size() > kMaxContextChars) {
+        code.truncate(kMaxContextChars);
+        truncated = true;
+    }
+    if (code.trimmed().isEmpty()) return QString();
+
+    QString ctx = QStringLiteral("【上下文】文件：%1%2\n```%3\n%4\n```")
+                      .arg(path.isEmpty() ? tr("(未保存)") : path,
+                           selection ? tr("（选区）") : (truncated ? tr("（全文，已截断）") : tr("（全文）")),
+                           suffix, code);
+    if (truncated) {
+        ctx += tr("\n（内容过长已截断到前 %1 字符）").arg(kMaxContextChars);
+    }
+    return ctx;
+}
+
+bool Widget::openAiAction(const QString& prompt)
+{
+    const QString ctx = buildAiContext();
+    if (ctx.isEmpty()) return false;
+
+    onOpenAiChat();
+    if (!m_aiChatPanel) return false;
+    m_aiChatPanel->sendAction(prompt, ctx);
+    return true;
 }
 
 void Widget::onOpenFolderRequested()

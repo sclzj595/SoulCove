@@ -111,6 +111,9 @@ private slots:
     void onSettingsClicked();
     void onSshConfigClicked();  // 打开SSH配置面板（标签页内嵌）
     void onOpenAiChat();        // M8: 打开 AI 助手对话面板（标签页内嵌）
+    // M8 stage2: AI 动作（选区/文件上下文注入）
+    bool openAiAction(const QString& prompt);   ///< 采集上下文→打开 AI 面板→发送；无可用上下文返回 false
+    QString buildAiContext() const;             ///< 当前编辑器选区（或全文）+ 文件信息，空表示无编辑器
 
     // === 标签页联动 ===
     void onCurrentEditorChanged(MyTextEdit* editor);
