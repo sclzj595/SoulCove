@@ -12,6 +12,7 @@
 #include <QTabWidget>
 
 class GitHistoryPanel;  // P2-H03 子项2: 历史面板（前向声明）
+class AIClient;         // M8 stage4: AI 提交信息生成
 
 /// @brief 源代码管理面板（Git 集成 UI）
 /// 显示分支、文件状态、diff，支持基本 Git 操作
@@ -52,6 +53,7 @@ private slots:
     void onStageClicked();
     void onRepoChanged();
     void onOperationFinished(const QString& op, bool success, const QString& output);
+    void onGenerateAiCommitMsg();   // M8 stage4: AI 生成提交信息
 
 private:
     void setupUi();
@@ -76,6 +78,9 @@ private:
     QPushButton*   m_btnCommit = nullptr;         // 提交按钮
     QPushButton*   m_btnDiscard = nullptr;        // 放弃更改按钮
     QPushButton*   m_btnStage = nullptr;          // 暂存更改按钮
+    QPushButton*   m_btnAiMsg = nullptr;          // M8 stage4: AI 生成提交信息按钮
+    AIClient*      m_aiClient = nullptr;          // M8 stage4: 非流式单轮客户端
+    QString        m_aiReplyBuffer;               // M8 stage4: 非流式响应累积
 
     QLabel*        m_statusLabel = nullptr;       // 状态提示标签
 

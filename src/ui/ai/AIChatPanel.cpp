@@ -5,6 +5,13 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QKeyEvent>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QFile>
+#include <QDir>
+#include <QFileInfo>
+#include <QStandardPaths>
 #include <QScrollBar>
 #include <QDateTime>
 #include <QGuiApplication>
@@ -18,6 +25,7 @@ AIChatPanel::AIChatPanel(QWidget* parent)
     setupUi();
     applyTheme();
     refreshProviders();
+    restoreSession();   // M8 stage4: 恢复上次会话
     connect(&m_flushTimer, &QTimer::timeout, this, [this]() {
         if (m_dirty) {
             m_dirty = false;
@@ -203,6 +211,7 @@ void AIChatPanel::onNewSessionClicked()
     m_history.clear();
     m_pendingAnswer.clear();
     rebuildHtml();
+    saveSession();   // M8 stage4: 新会话即清空持久化
     m_statusLabel->setText(tr("已开始新会话"));
     updateButtons();
 }
@@ -227,6 +236,7 @@ void AIChatPanel::onFinished(bool ok, const QString& error)
         m_pendingAnswer.clear();
         rebuildHtml();
         m_statusLabel->setText(tr("完成"));
+        saveSession();   // M8 stage4: 会话落盘
     } else {
         m_pendingAnswer.clear();
         rebuildHtml();
@@ -289,4 +299,67 @@ bool AIChatPanel::eventFilter(QObject* obj, QEvent* event)
         }
     }
     return QWidget::eventFilter(obj, event);
+}
+
+// ============================================================
+// M8 stage4: 会话历史持久化
+// ============================================================
+
+QString AIChatPanel::sessionFilePath() const
+{
+    return QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)
+           + QStringLiteral("/ai/chat_session.json");
+}
+
+void AIChatPanel::saveSession()
+{
+    // 只保留最近 40 条，避免配置文件无限膨胀
+    QList<AIChatMessage> trimmed = m_history;
+    if (trimmed.size() > 40)
+        trimmed = trimmed.mid(trimmed.size() - 40);
+
+    QJsonArray arr;
+    for (const AIChatMessage& m : trimmed) {
+        QJsonObject o;
+        o.insert(QStringLiteral("role"), m.role);
+        o.insert(QStringLiteral("content"), m.content);
+        arr.append(o);
+    }
+    QJsonObject root;
+    root.insert(QStringLiteral("history"), arr);
+
+    QFile f(sessionFilePath());
+    QDir().mkpath(QFileInfo(f).absolutePath());
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        LOG_DEBUG("[AIChatPanel] 会话保存失败");
+        return;
+    }
+    f.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+}
+
+void AIChatPanel::restoreSession()
+{
+    QFile f(sessionFilePath());
+    if (!f.open(QIODevice::ReadOnly)) return;
+
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+    if (!doc.isObject()) return;
+    const QJsonArray arr = doc.object().value(QStringLiteral("history")).toArray();
+
+    m_history.clear();
+    for (const QJsonValue& v : arr) {
+        const QJsonObject o = v.toObject();
+        const QString role = o.value(QStringLiteral("role")).toString();
+        const QString content = o.value(QStringLiteral("content")).toString();
+        if ((role == QLatin1String("user") || role == QLatin1String("assistant"))
+            && !content.isEmpty()) {
+            m_history.append({ role, content });
+        }
+    }
+    if (!m_history.isEmpty()) {
+        rebuildHtml();
+        updateButtons();
+        m_statusLabel->setText(tr("已恢复上次会话"));
+        LOG_DEBUG("[AIChatPanel] 恢复会话历史 " << m_history.size() << " 条");
+    }
 }

@@ -49,6 +49,10 @@ private:
     void applyTheme();
     void rebuildHtml();
     void updateButtons();
+    // M8 stage4: 会话历史持久化（ai/chat_session.json，应用重启自动恢复）
+    QString sessionFilePath() const;
+    void saveSession();
+    void restoreSession();
     AIProvider currentProvider() const;
     bool eventFilter(QObject* obj, QEvent* event) override;
 

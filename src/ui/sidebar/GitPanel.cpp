@@ -1,6 +1,8 @@
 #include "ui/sidebar/GitPanel.h"
 #include "ui/sidebar/GitHistoryPanel.h"
 #include "core/vcs/GitManager.h"
+#include "core/ai/AIClient.h"           // M8 stage4: AI 提交信息生成
+#include "core/ai/AIProviderStore.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -11,6 +13,7 @@
 
 GitPanel::GitPanel(QWidget* parent)
     : QWidget(parent)
+    , m_aiClient(new AIClient(this))    // M8 stage4
 {
     setupUi();
 
@@ -19,6 +22,21 @@ GitPanel::GitPanel(QWidget* parent)
             this, &GitPanel::onRepoChanged);
     connect(&GitManager::instance(), &GitManager::operationFinished,
             this, &GitPanel::onOperationFinished);
+
+    // M8 stage4: AI 非流式响应 → 回填提交消息输入框
+    connect(m_aiClient, &AIClient::deltaReceived, this, [this](const QString& d) {
+        m_aiReplyBuffer += d;
+    });
+    connect(m_aiClient, &AIClient::finished, this, [this](bool ok, const QString& err) {
+        m_btnAiMsg->setEnabled(true);
+        if (ok && !m_aiReplyBuffer.trimmed().isEmpty()) {
+            m_commitMsgEdit->setText(m_aiReplyBuffer.trimmed());
+            m_statusLabel->setText(tr("AI 提交信息已生成，可编辑后提交"));
+        } else if (!ok) {
+            m_statusLabel->setText(tr("AI 生成失败：") + err);
+        }
+        m_aiReplyBuffer.clear();
+    });
 
     // P2-H03 子项2: 转发历史面板的 diff 请求信号
     if (m_historyPanel) {
@@ -128,8 +146,15 @@ void GitPanel::setupUi()
     m_commitMsgEdit->setPlaceholderText(tr("输入提交描述..."));
     m_commitMsgEdit->setObjectName(QStringLiteral("gitCommitEdit"));
 
+    // M8 stage4: AI 生成提交信息
+    m_btnAiMsg = new QPushButton(tr("AI✨"), changesTab);
+    m_btnAiMsg->setObjectName(QStringLiteral("gitActionBtn"));
+    m_btnAiMsg->setToolTip(tr("根据当前变更 diff 由 AI 生成提交信息"));
+    m_btnAiMsg->setFixedWidth(48);
+
     commitLayout->addWidget(commitLabel);
     commitLayout->addWidget(m_commitMsgEdit, 1);
+    commitLayout->addWidget(m_btnAiMsg);
     changesLayout->addLayout(commitLayout);
 
     // === 状态标签 ===
@@ -159,6 +184,8 @@ void GitPanel::setupUi()
     });
     connect(m_btnDiscard, &QPushButton::clicked, this, &GitPanel::onDiscardClicked);
     connect(m_btnStage, &QPushButton::clicked, this, &GitPanel::onStageClicked);
+    // M8 stage4: AI 生成提交信息
+    connect(m_btnAiMsg, &QPushButton::clicked, this, &GitPanel::onGenerateAiCommitMsg);
 
     // 回车键提交
     connect(m_commitMsgEdit, &QLineEdit::returnPressed, this, &GitPanel::onCommitClicked);
@@ -378,4 +405,42 @@ void GitPanel::onOperationFinished(const QString& op, bool success, const QStrin
     } else {
         m_statusLabel->setText(tr("❌ ") + output.left(200));
     }
+}
+
+// ============================================================
+// M8 stage4: AI 生成提交信息
+// ============================================================
+
+void GitPanel::onGenerateAiCommitMsg()
+{
+    if (m_aiClient->isBusy()) return;
+
+    const AIProvider p = AIProviderStore::instance().activeProvider();
+    if (p.id.isEmpty()) {
+        m_statusLabel->setText(tr("请先在 设置 → AI 助手 中配置服务商"));
+        return;
+    }
+
+    const QString d = GitManager::instance().diff();
+    if (d.trimmed().isEmpty()) {
+        m_statusLabel->setText(tr("没有可提交的变更"));
+        return;
+    }
+
+    // 防爆量：截断到 12000 字符
+    QString diffText = d;
+    if (diffText.size() > 12000) {
+        diffText.truncate(12000);
+        diffText += QStringLiteral("\n...（diff 过长已截断）");
+    }
+
+    m_btnAiMsg->setEnabled(false);
+    m_statusLabel->setText(tr("AI 生成中…"));
+
+    QList<AIChatMessage> msgs;
+    msgs.append({ QStringLiteral("system"),
+                  QStringLiteral("你是 Git 提交信息生成器。根据 diff 生成简洁提交信息：第一行为中文概述（动词开头，不超过 50 字），空行后跟 2~4 条要点（每行一条，中文）。只输出提交信息本身，不要解释，不要 markdown 代码块。") });
+    msgs.append({ QStringLiteral("user"),
+                  QStringLiteral("diff:\n```diff\n%1\n```").arg(diffText) });
+    m_aiClient->chatOnce(p, msgs);
 }
