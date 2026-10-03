@@ -29,6 +29,7 @@ class ILineNumber;
 class CodeSyntaxHighlighter;
 class CodeFoldingManager;
 class MinimapRenderer;
+class GhostText;     // M8 stage5: AI 内联补全 ghost text
 
 // R1: LspHighlightState 从公共头文件引入（不再前向声明，保证类型安全）
 #include "core/lsp/LspTypes.h"
@@ -313,6 +314,7 @@ protected:
 private:
     ICompleter* m_completer = nullptr;   // 接口指针，解耦具体实现
     CodeSyntaxHighlighter* m_syntaxHighlighter = nullptr;  // 语法高亮器
+    GhostText* m_ghost = nullptr;        // M8 stage5: AI 内联补全 ghost text
     QStringList m_wordList;
 
     QTimer m_completionTimer;

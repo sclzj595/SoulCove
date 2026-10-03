@@ -1,5 +1,6 @@
 #include "ui/editor/MyTextEdit.h"
 #include "ui/editor/TextCompleter.h"       // 具体类仅在cpp中使用（用于isChineseChar等静态方法）
+#include "ui/editor/GhostText.h"           // M8 stage5: AI 内联补全 ghost text
 #include "ui/editor/LineNumberArea.h"
 #include "core/config/ThemeManager.h"
 #include "core/config/ConfigManager.h"
@@ -68,6 +69,16 @@ MyTextEdit::MyTextEdit(QWidget *parent) : QTextEdit(parent), lineNumersVisible(t
     // MinimapRenderer 构造时创建子控件并 installEventFilter，
     // 鼠标点击/绘制事件由 MinimapRenderer::eventFilter 自身拦截处理
     m_minimapRenderer = new MinimapRenderer(this, this);
+
+    // ========== M8 stage5: AI 内联补全 ghost text 初始化 ==========
+    m_ghost = new GhostText(this, this);
+    // 补全弹窗可见时内联补全让位（不请求）
+    m_ghost->setTriggerGuard([this]() {
+        return m_completer && m_completer->isCompletionVisible();
+    });
+    // ghost 插入/撤下后刷新 extra selections（复用括号高亮重建管线）
+    connect(m_ghost, &GhostText::refreshRequested,
+            this, [this]() { highlightMatchingBracket(); });
 
     // 加载缩进配置（tabSize / indentStyle）
     loadIndentConfig();
@@ -162,6 +173,11 @@ void MyTextEdit::handleTextChanged()
 
     // J1: 程序化文本加载（打开文件/跳转定义）时抑制补全弹窗，避免编辑器卡顿
     if (m_suppressCompletion) {
+        return;
+    }
+
+    // M8 stage5: ghost text 自身的插入/撤下不触发补全弹窗（弹窗与 ghost 互斥让位）
+    if (m_ghost && m_ghost->isInternalEdit()) {
         return;
     }
 
@@ -502,6 +518,10 @@ void MyTextEdit::insertIndent()
 // 优化 keyPressEvent 函数
 void MyTextEdit::keyPressEvent(QKeyEvent *event)
 {
+    // M8 stage5: ghost text 按键前哨 —— Tab 接受 / Esc 取消（消费）；
+    // 其余按键先撤下 ghost 再放行默认处理（返回 false）
+    if (m_ghost && m_ghost->isActive() && m_ghost->handleKeyPress(event)) return;
+
     int key = event->key();
 
     // 按键时中止悬停预览（非修饰键才触发，避免 Ctrl/Shift 等误触）
@@ -1222,6 +1242,9 @@ void MyTextEdit::mouseReleaseEvent(QMouseEvent* event)
 
 void MyTextEdit::mousePressEvent(QMouseEvent* event)
 {
+    // M8 stage5: 光标重定位（鼠标点击）时撤下 ghost
+    if (m_ghost) m_ghost->dismiss();
+
     // P3-M03 子项3: Shift+Alt+左键拖拽 → 进入列选择模式
     // 必须在 C03-6 (Ctrl+Alt) 和 T17 (Alt+Click) 分支之前匹配
     if ((event->modifiers() & Qt::ShiftModifier) &&
@@ -1491,6 +1514,9 @@ void MyTextEdit::highlightMatchingBracket()
 
     // T17: 次级光标高亮
     allSelections.append(m_secondarySelections);
+
+    // M8 stage5: AI 内联补全 ghost 文本（灰色前景）
+    if (m_ghost) m_ghost->appendSelection(allSelections);
 
     setExtraSelections(allSelections);
 }

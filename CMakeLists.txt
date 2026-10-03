@@ -201,6 +201,7 @@ set(SOURCES
     src/ui/editor/FindReplaceBar.cpp          # 查找替换面板（正则+大小写+全部替换）
     src/ui/editor/EditorSplitView.cpp         # 编辑器分栏视图（共享文档同步编辑）
     src/ui/editor/HoverPopup.cpp              # H1: Markdown 悬停预览弹窗（富文本渲染）
+    src/ui/editor/GhostText.cpp               # M8 stage5: AI 内联补全 ghost text（Tab 接受/Esc 取消）
     src/ui/editor/DefinitionPreviewPopup.cpp  # C03-6: 定义预览弹窗（Ctrl+Alt+Click 悬浮）
 
     # ===== ui/markdown/ Markdown UI 层 =====
