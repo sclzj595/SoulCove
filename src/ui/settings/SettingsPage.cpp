@@ -418,6 +418,10 @@ void SettingsPage::createEditorPage(QWidget* page)
     autoSaveHint->setObjectName(QStringLiteral("settingsHint"));
     layout->addWidget(autoSaveHint);
 
+    // --- M8 stage5: AI 内联补全开关 ---
+    m_inlineCompletionCheck = new QCheckBox(tr("AI 内联补全（输入停顿后显示灰色建议，Tab 接受 / Esc 取消）"), page);
+    layout->addWidget(m_inlineCompletionCheck);
+
     // --- JSON 自动格式化 (M10) ---
     m_autoFormatJsonCheck = new QCheckBox(tr("保存 .json 文件时自动格式化"), page);
     layout->addWidget(m_autoFormatJsonCheck);
@@ -443,6 +447,9 @@ void SettingsPage::createEditorPage(QWidget* page)
             this, &SettingsPage::onTabSizeChanged);
     connect(m_autoSaveCheck, &QCheckBox::toggled,
             this, &SettingsPage::onAutoSaveToggled);
+    // M8 stage5: AI 内联补全开关
+    connect(m_inlineCompletionCheck, &QCheckBox::toggled,
+            this, &SettingsPage::onInlineCompletionToggled);
     connect(m_autoSaveIntervalSpin, QOverload<int>::of(&QSpinBox::valueChanged),
             this, &SettingsPage::onAutoSaveIntervalChanged);
     connect(m_indentStyleCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -1918,6 +1925,7 @@ void SettingsPage::loadCurrentConfig()
     m_autoSaveIntervalSpin->setValue(config.autoSaveInterval());  // O29
     m_completionCheck->setChecked(config.showCompletion());
     m_lineNumbersCheck->setChecked(config.showLineNumbers());
+    m_inlineCompletionCheck->setChecked(config.inlineCompletion());  // M8 stage5
 
     // 终端
     QString termType = config.getValue("Terminal/type", QStringLiteral("cmd")).toString();
@@ -2076,6 +2084,13 @@ void SettingsPage::onAutoSaveIntervalChanged(int value)
 void SettingsPage::onCompletionToggled(bool checked)
 {
     ConfigManager::instance().setShowCompletion(checked);
+    emit configChanged();
+}
+
+// M8 stage5: AI 内联补全开关（GhostText 每次请求时读配置，实时生效）
+void SettingsPage::onInlineCompletionToggled(bool checked)
+{
+    ConfigManager::instance().setInlineCompletion(checked);
     emit configChanged();
 }
 
@@ -2518,6 +2533,7 @@ void SettingsPage::onResetCurrentSection()
         break;
     case 1: // 编辑器
         m_lineNumbersCheck->setChecked(true);
+        m_inlineCompletionCheck->setChecked(true);  // M8 stage5: 内联补全默认开启
         m_tabSizeSpin->setValue(4);
         m_autoSaveCheck->setChecked(false);
         m_autoSaveIntervalSpin->setValue(30);  // O29: 恢复默认间隔
@@ -2680,6 +2696,7 @@ void SettingsPage::onExportConfig()
     editor[QStringLiteral("autoSaveInterval")] = config.autoSaveInterval();  // O29
     editor[QStringLiteral("showLineNumbers")] = config.showLineNumbers();
     editor[QStringLiteral("showCompletion")] = config.showCompletion();
+    editor[QStringLiteral("inlineCompletion")] = config.inlineCompletion();  // M8 stage5
     editor[QStringLiteral("tabSize")] = config.getValue("Editor/tabSize", 4).toInt();
     root[QStringLiteral("editor")] = editor;
 
@@ -2777,6 +2794,11 @@ void SettingsPage::onImportConfig()
             bool show = editor[QStringLiteral("showLineNumbers")].toBool();
             config.setShowLineNumbers(show);
             m_lineNumbersCheck->setChecked(show);
+        }
+        if (editor.contains(QStringLiteral("inlineCompletion"))) {  // M8 stage5
+            const bool on = editor[QStringLiteral("inlineCompletion")].toBool();
+            config.setInlineCompletion(on);
+            m_inlineCompletionCheck->setChecked(on);
         }
         if (editor.contains(QStringLiteral("showCompletion"))) {
             bool show = editor[QStringLiteral("showCompletion")].toBool();

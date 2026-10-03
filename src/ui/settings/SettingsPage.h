@@ -58,6 +58,7 @@ private slots:
     void onAutoSaveToggled(bool checked);
     void onAutoSaveIntervalChanged(int value);  // O29: 自动保存间隔（秒）
     void onCompletionToggled(bool checked);
+    void onInlineCompletionToggled(bool checked);  // M8 stage5: AI 内联补全开关
     void onLineNumbersToggled(bool checked);
     void onTabSizeChanged(int value);
     void onIndentStyleChanged(int index);          // M4
@@ -169,6 +170,7 @@ private:
     // === 编辑器配置 ===
     QCheckBox* m_autoSaveCheck;
     QSpinBox*  m_autoSaveIntervalSpin;  // O29: 自动保存间隔（秒）
+    QCheckBox* m_inlineCompletionCheck = nullptr;  // M8 stage5: AI 内联补全开关
 
     // === M8: AI 服务商配置 ===
     void createAIPage(QWidget* page);

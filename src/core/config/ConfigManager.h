@@ -44,6 +44,7 @@ public:
     int autoSaveInterval() const;  // O29: 自动保存间隔（秒，5~3600，默认 30）
     QString windowGeometry() const;
     bool showCompletion() const;
+    bool inlineCompletion() const;  // M8 stage5: AI 内联补全开关（默认开启）
 
     void setShowLineNumbers(bool show);
     void setFontSize(int size);
@@ -52,6 +53,7 @@ public:
     void setAutoSaveInterval(int seconds);  // O29: 自动保存间隔（秒）
     void setWindowGeometry(const QString& geometry);
     void setShowCompletion(bool show);
+    void setInlineCompletion(bool enable);  // M8 stage5
 
     // === 窗口最大化状态 ===
     bool windowMaximized() const;

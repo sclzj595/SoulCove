@@ -157,6 +157,17 @@ void ConfigManager::setAutoSave(bool enable)
     setValue("Editor/autoSave", enable);
 }
 
+// M8 stage5: AI 内联补全开关（默认开启）
+bool ConfigManager::inlineCompletion() const
+{
+    return getValue(QStringLiteral("Editor/inlineCompletion"), true).toBool();
+}
+
+void ConfigManager::setInlineCompletion(bool enable)
+{
+    setValue(QStringLiteral("Editor/inlineCompletion"), enable);
+}
+
 // O29: 自动保存间隔可配置（秒，钳制 5~3600，默认 30）
 int ConfigManager::autoSaveInterval() const
 {

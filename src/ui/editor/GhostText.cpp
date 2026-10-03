@@ -1,6 +1,8 @@
 #include "ui/editor/GhostText.h"
 #include "core/ai/AIClient.h"
 #include "core/ai/AIProviderStore.h"
+#include "core/config/ConfigManager.h"
+#include "core/config/ThemeManager.h"
 #include "Logger.hpp"
 
 #include <QKeyEvent>
@@ -103,6 +105,8 @@ void GhostText::requestCompletion()
 {
     if (m_editor->isReadOnly() || isActive() || isBusy()) return;
     if (m_triggerGuard && m_triggerGuard()) return;
+    // M8 收口: 设置页开关（每次请求时读取，改配置即实时生效）
+    if (!ConfigManager::instance().inlineCompletion()) return;
 
     const AIProvider p = AIProviderStore::instance().activeProvider();
     if (p.id.isEmpty()) return;
@@ -181,6 +185,7 @@ void GhostText::appendSelection(QList<QTextEdit::ExtraSelection>& out) const
     if (!isActive()) return;
     QTextEdit::ExtraSelection sel;
     sel.cursor = m_ghostCursor;
-    sel.format.setForeground(QColor(128, 128, 128));   // 灰色幽灵文本（后续可接主题）
+    // M8 收口: 主题感知 —— 用当前主题次级前景色（明暗主题自动适配）
+    sel.format.setForeground(ThemeManager::instance().currentPalette().fgSecondary);
     out.append(sel);
 }
