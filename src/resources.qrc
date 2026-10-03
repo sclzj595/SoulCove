@@ -8,7 +8,7 @@
 		<file alias="close">icon/close.png</file>
 		<file alias="note">icon/note.png</file>
 		<file alias="note_blue">icon/note_blue.png</file>
-		<file alias="app_icon">icon/vscode.png</file>
+		<file alias="app_icon">icon/app_icon.png</file>
 		<file alias="sys_param">config/sys_param.ini</file>
 		<file alias="modern.qss">styles/modern.qss</file>
 	</qresource>

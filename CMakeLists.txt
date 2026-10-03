@@ -431,9 +431,16 @@ set(TS_FILES
     src/i18n/scNotebook_en_US.ts   # 英文翻译
 )
 
+# ====== Windows exe 图标资源（app.rc → windres 嵌入 app.ico）======
+# 三个产品共享同一 .rc，使资源管理器/任务栏显示应用图标
+set(APP_RC "")
+if(WIN32)
+    set(APP_RC src/app.rc)
+endif()
+
 # ====== 产品1: scIDE (IDE 全功能) ======
 # 产品线终点：完整IDE，支持LSP/终端/Git/任务/大纲
-add_executable(scIDE products/ide/main.cpp)
+add_executable(scIDE products/ide/main.cpp ${APP_RC})
 target_link_libraries(scIDE PRIVATE scCore)
 
 # 生成 .qm 二进制翻译文件（Qt 6.5.x 兼容）
@@ -444,7 +451,7 @@ qt6_add_translations(scIDE
 
 # ====== 产品2: scEditor (代码编辑器) ======
 # 产品线中段：支持文件树/搜索/格式化，无LSP/终端/Git
-add_executable(scEditor products/editor/main.cpp)
+add_executable(scEditor products/editor/main.cpp ${APP_RC})
 target_link_libraries(scEditor PRIVATE scCore)
 
 # P3-M05: scEditor 同样嵌入 .qm 翻译资源（:/i18n/）
@@ -454,7 +461,7 @@ qt6_add_translations(scEditor
 
 # ====== 产品3: scNotebook (纯文本编辑器) ======
 # 产品线起点：纯文本编辑 + Markdown 预览
-add_executable(scNotebook products/notebook/main.cpp)
+add_executable(scNotebook products/notebook/main.cpp ${APP_RC})
 target_link_libraries(scNotebook PRIVATE scCore)
 
 # P3-M05: scNotebook 同样嵌入 .qm 翻译资源（:/i18n/）
