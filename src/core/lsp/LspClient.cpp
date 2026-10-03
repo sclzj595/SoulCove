@@ -201,6 +201,13 @@ QByteArray LspClient::createRequest(const QString& method, const QJsonObject& pa
             if (m_lastReferencesRequestId == id) m_lastReferencesRequestId = -1;
             if (m_lastImplementationRequestId == id) m_lastImplementationRequestId = -1;
             LOG_WARN_S("LspClient", "createRequest", "请求超时 [" << method << "] id=" << id);
+            // M3: initialize 握手超时 → 走 serverStopped 自动重连路径。
+            //     原实现仅移除 pending，m_initialized 永为 false，LSP"僵尸化"
+            //     （语义高亮/补全永久失效直到手动重启）
+            if (method == QLatin1String("initialize")) {
+                LOG_WARN_S("LspClient", "createRequest", "initialize 握手超时，触发自动重连");
+                emit serverStopped();
+            }
         }
         m_timeoutTimers.remove(id);
     });
@@ -498,21 +505,23 @@ void LspClient::onServerOutput()
         if (headerEnd < 0) break;  // 头部不完整，等待更多数据
 
         // 解析 Content-Length
+        // M3: 按 \r\n 逐行切分查找 —— 旧实现假设 Content-Length 是最后一个头，
+        //     若服务器先发 Content-Type（LSP 规范允许任意头顺序）则解析失败整条丢弃
         QByteArray header = m_buffer.left(headerEnd);
-        int lengthPos = header.indexOf("Content-Length:");
-        if (lengthPos < 0) {
-            LOG_WARN_S("LspClient", "onServerOutput", "无效的消息头（缺少 Content-Length）");
-            m_buffer.remove(0, headerEnd + 4);  // 跳过无效头部
-            continue;
+        int contentLength = -1;
+        const QList<QByteArray> headerLines = header.split('\n');
+        for (const QByteArray& line : headerLines) {
+            QByteArray trimmed = line.trimmed();
+            if (trimmed.startsWith("Content-Length:")) {
+                bool ok = false;
+                contentLength = trimmed.mid(15).trimmed().toInt(&ok);
+                if (!ok) contentLength = -1;
+                break;
+            }
         }
-
-        // 提取长度值
-        QByteArray lengthStr = header.mid(lengthPos + 16).trimmed();  // "Content-Length:" 长度 16
-        bool ok = false;
-        int contentLength = lengthStr.toInt(&ok);
-        if (!ok || contentLength <= 0) {
-            LOG_WARN_S("LspClient", "onServerOutput", "无效的 Content-Length 值:" << lengthStr);
-            m_buffer.remove(0, headerEnd + 4);
+        if (contentLength < 0) {
+            LOG_WARN_S("LspClient", "onServerOutput", "无效的消息头（缺少/非法 Content-Length）");
+            m_buffer.remove(0, headerEnd + 4);  // 跳过无效头部
             continue;
         }
 

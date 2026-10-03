@@ -2,6 +2,7 @@
 #include "core/lsp/LspClient.h"
 #include "core/lsp/LanguageRegistry.h"  // R2: 语言注册表（单一数据源）
 #include "core/config/ConfigManager.h"
+#include "controller/FileController.h"  // M3: 统一编码检测读取
 #include "Logger.hpp"
 
 #include <QUrl>
@@ -830,7 +831,16 @@ void LspManager::onServerStopped(const QString& langId)
     emit lspStateChanged(langId, LspHighlightState::Disconnected);
 
     // 指数退避：第1次 2s，第2次 4s，第3次 8s，最多 30s
+    // M3: 重连次数上限 —— "启动成功但立即崩溃"（坏参数/坏配置）时原实现会无限重启
+    constexpr int kMaxRestartAttempts = 5;
     int& restartCount = m_restartCount[langId];
+    if (restartCount >= kMaxRestartAttempts) {
+        LOG_ERROR("[LspManager] LSP 服务器连续异常停止 " << kMaxRestartAttempts
+                  << " 次，停止自动重连 (langId=" << langId.toStdString() << ")");
+        m_restartCount.remove(langId);
+        emit lspStateChanged(langId, LspHighlightState::Disconnected);
+        return;
+    }
     int delayMs = qMin(2000 * (1 << restartCount), 30000);
     restartCount++;
 
@@ -874,10 +884,11 @@ void LspManager::restartServer(const QString& langId)
     // 重新打开所有文件（触发 getOrCreateClient → startServer → didOpen）
     for (const QString& filePath : filesToReopen) {
         m_fileToLangId.remove(filePath);  // 先移除，openFile 会重新添加
-        // 从磁盘读取内容（若编辑器有未保存内容，Widget 层会通过 documentChanged 同步）
-        QFile f(filePath);
-        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            QString content = QString::fromUtf8(f.readAll());
+        // M3: 走 FileController::readFile 统一编码检测 —— 原实现硬编码
+        //     QString::fromUtf8，GBK/GB18030 文件发给 clangd 的内容与编辑器
+        //     显示不一致，导致诊断/跳转行列错位
+        QString content = FileController::readFile(filePath);
+        if (!content.isNull()) {
             openFile(filePath, content);
         }
     }

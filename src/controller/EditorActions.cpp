@@ -138,7 +138,16 @@ void EditorActions::formatDocument(IEditorEdit* editor, const QString& filePath)
     auto* editWidget = qobject_cast<MyTextEdit*>(editor->asWidget());
     if (editWidget) scrollValue = editWidget->verticalScrollBar()->value();
 
-    editor->setPlainText(formatted);
+    // M3: 整体替换文本必须走「全选 + 单次 insertText + 单 edit block」，
+    //     原实现 setPlainText 会重建 QTextDocument，摧毁用户全部撤销历史
+    //     （误格式化后 Ctrl+Z 无法恢复）。
+    {
+        QTextCursor cur = editor->textCursor();
+        cur.beginEditBlock();
+        cur.select(QTextCursor::Document);
+        cur.insertText(formatted);
+        cur.endEditBlock();
+    }
 
     // 恢复光标位置（不超过文档长度）
     QTextCursor cursor = editor->textCursor();

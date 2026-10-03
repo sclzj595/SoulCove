@@ -310,38 +310,73 @@ void FindReplaceBar::replaceAll()
 {
     if (!m_editor || m_findEdit->text().isEmpty()) return;
 
-    QTextCursor cursor(m_editor->document());
-    cursor.beginEditBlock();
+    // M3: 重写为「全文一次性替换 + 单 edit block」。
+    // 旧实现两个致命问题：
+    //   1) 纯文本分支 while(m_editor->find(...)) 依赖环绕语义，查找串与替换串
+    //      相同（或替换结果再次命中）时永不前进 → 主线程死循环挂死；
+    //   2) beginEditBlock 挂在独立 cursor 上、实际编辑走其他 cursor，
+    //      违反 Qt 单 cursor edit block 约束（UB），且 N 次替换无法合并为一步撤销。
+    QTextDocument* doc = m_editor->document();
+    const QString needle = m_findEdit->text();
+    const QString replacement = m_replaceEdit->text();
+    const bool caseSensitive = m_chkCaseSensitive->isChecked();
+    const QString text = doc->toPlainText();
 
+    QString result;
+    qsizetype last = 0;
     int count = 0;
-    QTextDocument::FindFlags flags = findFlags();
 
     if (m_chkRegex->isChecked()) {
-        QRegularExpression regex(m_findEdit->text(),
-            m_chkCaseSensitive->isChecked() ? QRegularExpression::NoPatternOption
-                                            : QRegularExpression::CaseInsensitiveOption);
-        if (!regex.isValid()) {
-            cursor.endEditBlock();
-            return;
-        }
-        QTextDocument* doc = m_editor->document();
-        QTextCursor result = doc->find(regex, 0);
-        while (!result.isNull()) {
-            result.insertText(m_replaceEdit->text());
+        QRegularExpression regex(needle,
+            caseSensitive ? QRegularExpression::NoPatternOption
+                          : QRegularExpression::CaseInsensitiveOption);
+        if (!regex.isValid()) return;
+        QRegularExpressionMatchIterator it = regex.globalMatch(text);
+        while (it.hasNext()) {
+            const QRegularExpressionMatch m = it.next();
+            if (m.capturedStart() < last) continue;  // 零宽/重叠匹配保护，杜绝原地循环
+            result += text.mid(last, m.capturedStart() - last) + replacement;
+            last = m.capturedEnd();
             count++;
-            result = doc->find(regex, result);
         }
+        result += text.mid(last);
     } else {
-        // 简单文本替换
-        cursor.movePosition(QTextCursor::Start);
-        while (m_editor->find(m_findEdit->text(), flags)) {
-            QTextCursor c = m_editor->textCursor();
-            c.insertText(m_replaceEdit->text());
+        const Qt::CaseSensitivity cs =
+            caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
+        const bool wholeWords = (findFlags() & QTextDocument::FindWholeWords) != 0;
+        auto isWordChar = [](QChar c) { return c.isLetterOrNumber() || c == QLatin1Char('_'); };
+        auto indexOfWholeWord = [&](qsizetype from) -> qsizetype {
+            qsizetype p = text.indexOf(needle, from, cs);
+            while (p >= 0) {
+                const bool okBefore = (p == 0) || !isWordChar(text[p - 1]);
+                const bool okAfter = (p + needle.size() >= text.size())
+                                     || !isWordChar(text[p + needle.size()]);
+                if (okBefore && okAfter) return p;
+                p = text.indexOf(needle, p + 1, cs);
+            }
+            return -1;
+        };
+        qsizetype pos = 0;
+        while ((pos = wholeWords ? indexOfWholeWord(pos) : text.indexOf(needle, pos, cs)) >= 0) {
+            result += text.mid(last, pos - last) + replacement;
+            last = pos + needle.size();
+            pos = last;
             count++;
         }
+        result += text.mid(last);
     }
 
-    cursor.endEditBlock();
+    if (count == 0) {
+        m_matchCountLabel->setText(tr("已替换 0 处"));
+        return;
+    }
+
+    // 整体替换 = 单步撤销（Ctrl+Z 一次回到替换前）
+    QTextCursor cur(doc);
+    cur.beginEditBlock();
+    cur.select(QTextCursor::Document);
+    cur.insertText(result);
+    cur.endEditBlock();
     m_matchCountLabel->setText(tr("已替换 %1 处").arg(count));
 }
 

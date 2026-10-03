@@ -35,15 +35,24 @@ QString FileController::readFile(const QString& filePath,
     QString effectiveEncoding = QStringLiteral("UTF-8");
 
     if (result.isValid && result.codec) {
+        // M3: BOM 信息回传（BOM 是文件属性，写盘时需要据此恢复，避免"往返一次 BOM 丢失"）
         effectiveEncoding = result.encodingName;
+        if (result.hasBOM && effectiveEncoding == QLatin1String("UTF-8"))
+            effectiveEncoding = QStringLiteral("UTF-8 (BOM)");
         content = result.codec->toUnicode(rawData);
-    } else if (effectiveEncoding.compare("GBK", Qt::CaseInsensitive) == 0 ||
-               effectiveEncoding.compare("GB18030", Qt::CaseInsensitive) == 0) {
-        QTextCodec* codec = QTextCodec::codecForName(effectiveEncoding.toUtf8());
-        content = codec ? codec->toUnicode(rawData) : QString::fromUtf8(rawData);
     } else {
-        auto decoder = QStringDecoder(QStringConverter::Utf8);
-        content = decoder.isValid() ? decoder(rawData) : QString::fromUtf8(rawData);
+        // M3: 旧分支比较的是恒为初始值的 effectiveEncoding（死代码）；
+        //     codec 缺失时明确走 GBK 兜底重取，仍失败再回退 UTF-8
+        QTextCodec* codec = QTextCodec::codecForName("GB18030");
+        if (!codec) codec = QTextCodec::codecForName("GBK");
+        if (codec) {
+            effectiveEncoding = QString::fromLatin1(codec->name());
+            content = codec->toUnicode(rawData);
+        } else {
+            effectiveEncoding = QStringLiteral("UTF-8");
+            auto decoder = QStringDecoder(QStringConverter::Utf8);
+            content = decoder.isValid() ? decoder(rawData) : QString::fromUtf8(rawData);
+        }
     }
 
     if (detectedEncoding) *detectedEncoding = effectiveEncoding;
@@ -114,11 +123,13 @@ bool FileController::writeFile(const QString& filePath,
 {
     // P3-M03 子项1: 按指定 EOL 类型统一行尾
     // Qt 文档内部使用单个 '\n'（U+000A）作为段落分隔符，转换为指定 EOL 序列
+    // M3: 先归一化 \r\n → \n，避免内容已含 CRLF 时二次展开成 \r\r\n
     QString normalized = content;
+    normalized.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
     if (eol.compare(QStringLiteral("CRLF"), Qt::CaseInsensitive) == 0) {
-        normalized = QString(content).replace(QChar('\n'), QStringLiteral("\r\n"));
+        normalized.replace(QChar('\n'), QStringLiteral("\r\n"));
     } else if (eol.compare(QStringLiteral("CR"), Qt::CaseInsensitive) == 0) {
-        normalized = QString(content).replace(QChar('\n'), QChar('\r'));
+        normalized.replace(QChar('\n'), QChar('\r'));
     }
     // LF 或空字符串：保持 \n（无需转换）
 
@@ -130,27 +141,49 @@ bool FileController::writeFile(const QString& filePath,
         return false;
     }
 
-    // GBK/GB18030 走 QTextCodec
+    // UTF-8 BOM：先写 BOM 头再按 UTF-8 写出（M3：修复带 BOM 文件往返一次 BOM 丢失）
+    if (encoding.compare("UTF-8 (BOM)", Qt::CaseInsensitive) == 0 ||
+        encoding.compare("UTF-8 BOM", Qt::CaseInsensitive) == 0) {
+        file.write(QByteArrayLiteral("\xEF\xBB\xBF"));
+        file.write(normalized.toUtf8());
+        file.flush();
+        file.close();
+        return true;
+    }
+
+    // GBK/GB18030 走 QTextCodec（M3：codec 缺失时拒绝写盘，禁止静默转 UTF-8 损坏数据）
     if (encoding.compare("GBK", Qt::CaseInsensitive) == 0 ||
-        encoding.compare("GB18030", Qt::CaseInsensitive) == 0) {
+        encoding.compare("GB2312", Qt::CaseInsensitive) == 0 ||
+        encoding.compare("GB18030", Qt::CaseInsensitive) == 0 ||
+        encoding.compare("ANSI", Qt::CaseInsensitive) == 0) {
         QTextCodec* codec = QTextCodec::codecForName(encoding.toUtf8());
+        if (!codec && encoding.compare("ANSI", Qt::CaseInsensitive) == 0)
+            codec = QTextCodec::codecForLocale();  // ANSI = 系统本地编码
         if (codec) {
             file.write(codec->fromUnicode(normalized));
             file.flush();
             file.close();
             return true;
         }
+        LOG_ERROR("[FileController] writeFile 编码器缺失，拒绝写盘:" << encoding);
+        return false;
     }
 
-    // UTF-16 走 QTextCodec
+    // UTF-16 走 QTextCodec（LE/BE 变体需手动补 BOM，Qt 的 LE/BE codec 不自带）
     if (encoding.contains("UTF-16", Qt::CaseInsensitive)) {
         QTextCodec* codec = QTextCodec::codecForName(encoding.toUtf8());
         if (codec) {
+            if (encoding.contains("LE", Qt::CaseInsensitive))
+                file.write(QByteArrayLiteral("\xFF\xFE"));
+            else if (encoding.contains("BE", Qt::CaseInsensitive))
+                file.write(QByteArrayLiteral("\xFE\xFF"));
             file.write(codec->fromUnicode(normalized));
             file.flush();
             file.close();
             return true;
         }
+        LOG_ERROR("[FileController] writeFile UTF-16 编码器缺失:" << encoding);
+        return false;
     }
 
     // 默认：QStringConverter（UTF-8 / ASCII 等）

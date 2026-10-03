@@ -120,7 +120,9 @@ EncodingDetectionResult EncodingDetector::detect(const QByteArray& rawData)
         break;
     }
 
-    result.hasBOM = false;
+    // M3: 只有"无 BOM"分支才清除标记 —— 原代码无条件覆盖，
+    //     导致上方 BOM 检测结果永远丢失（writeFile 无法据此恢复 BOM）
+    if (!hasBom) result.hasBOM = false;
     result.isValid = (result.codec != nullptr);
     return result;
 }

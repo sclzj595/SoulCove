@@ -8,6 +8,7 @@
 #include <QListWidget>
 #include <QStringList>
 #include <QTextEdit>
+#include <QPointer>
 #include <QTimer>
 #include <QKeyEvent>
 #include <QMap>
@@ -133,7 +134,10 @@ private slots:
 
 private:
 	// 私有字段 属性 
-	QTextEdit* m_textEdit = nullptr;		// 绑定的文本编辑器 和 myTextEdit联动
+	// M3: QPointer 保护 —— 共享补全器持有编辑器裸指针，标签关闭（deleteLater）后
+	//     防抖/单发定时器仍可能触发 sendEvent 造成 use-after-free；
+	//     QPointer 在目标析构时自动置空，所有既有判空逻辑即刻生效
+	QPointer<QTextEdit> m_textEdit;		// 绑定的文本编辑器 和 myTextEdit联动
 	QStringList m_wordList;					// 候选词列表
 	QStringList m_filteredList;				// 筛选后的候选词列表
 	int m_minPrefixLen = 2;					// 触发智能补充的最小前缀长度

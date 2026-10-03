@@ -1746,7 +1746,10 @@ void Widget::saveCurrentFileDirect()
         QString savedContent = m_currentTextEdit->toPlainText();
         QTimer::singleShot(0, this, [this, currentPath, savedContent]() {
             if (!m_tabBar) return;
-            MyTextEdit* ed = static_cast<MyTextEdit*>(m_tabBar->currentEditor());
+            // M3: 接口指针禁止 static_cast 硬下转，统一 qobject_cast + 判空
+            MyTextEdit* ed = m_tabBar->currentEditor()
+                ? qobject_cast<MyTextEdit*>(m_tabBar->currentEditor()->asWidget())
+                : nullptr;
             if (!ed) return;
             if (m_tabBar->currentFilePath() != currentPath) return;
 
@@ -1889,29 +1892,42 @@ void Widget::onFileChangedExternally(const QString& path)
 
     LOG_DEBUG("[Widget] 检测到文件外部修改:" << path);
 
-    // 弹窗询问用户是否重新加载
-    auto result = ModernDialog::question(
-        this, tr("文件已修改"),
-        tr("文件 \"%1\" 已被外部程序修改。\n是否重新加载？").arg(FileController::fileName(path))
-    );
+    // M3: 队列化处理 —— FSW 信号槽内直接弹模态框会重入事件循环；
+    //     且旧实现无条件用磁盘内容覆盖，编辑器有未保存修改时被静默丢弃
+    QTimer::singleShot(0, this, [this, path]() {
+        if (m_suppressFileWatch) return;
+        if (!m_tabBar || m_tabBar->currentFilePath() != path) return;  // 用户已切走
 
-    if (result == ModernDialog::ROLE_ACCEPT) {
-        // 重新加载文件
-        if (m_fileOperator) {
-            m_suppressFileWatch = true;
-            m_fileOperator->openFile(path);
-            // 重新添加监听（openFile 可能触发信号）
-            QTimer::singleShot(500, this, [this, path]() {
-                if (m_fileWatcher && !m_fileWatcher->files().contains(path))
-                    m_fileWatcher->addPath(path);
-                m_suppressFileWatch = false;
-            });
+        auto* ed = m_currentTextEdit
+            ? qobject_cast<MyTextEdit*>(m_currentTextEdit->asWidget())
+            : nullptr;
+        const bool hasUnsaved = ed && ed->isModified();
+        const QString msg = hasUnsaved
+            ? tr("文件 \"%1\" 已被外部程序修改，且当前有未保存的修改。\n重新加载将丢弃未保存内容，是否继续？")
+                .arg(FileController::fileName(path))
+            : tr("文件 \"%1\" 已被外部程序修改。\n是否重新加载？")
+                .arg(FileController::fileName(path));
+
+        auto result = ModernDialog::question(this, tr("文件已修改"), msg);
+
+        if (result == ModernDialog::ROLE_ACCEPT) {
+            // 重新加载文件
+            if (m_fileOperator) {
+                m_suppressFileWatch = true;
+                m_fileOperator->openFile(path);
+                // 重新添加监听（openFile 可能触发信号）
+                QTimer::singleShot(500, this, [this, path]() {
+                    if (m_fileWatcher && !m_fileWatcher->files().contains(path))
+                        m_fileWatcher->addPath(path);
+                    m_suppressFileWatch = false;
+                });
+            }
+        } else {
+            // 用户选择忽略 — 重新添加监听以便下次修改再提示
+            if (m_fileWatcher && !m_fileWatcher->files().contains(path))
+                m_fileWatcher->addPath(path);
         }
-    } else {
-        // 用户选择忽略 — 重新添加监听以便下次修改再提示
-        if (m_fileWatcher && !m_fileWatcher->files().contains(path))
-            m_fileWatcher->addPath(path);
-    }
+    });
 }
 
 void Widget::onFileOpenFromSidebar(const QString& filePath)
@@ -1951,7 +1967,10 @@ void Widget::onFileOpenFromSidebar(const QString& filePath)
     // 使用 QTimer::singleShot(0) 确保 editor 已完成 enableSyntaxHighlighting 后再设置
     QTimer::singleShot(0, this, [this, filePath, content]() {
         if (!m_tabBar) return;
-        MyTextEdit* ed = static_cast<MyTextEdit*>(m_tabBar->currentEditor());
+        // M3: 接口指针禁止 static_cast 硬下转，统一 qobject_cast + 判空
+        MyTextEdit* ed = m_tabBar->currentEditor()
+            ? qobject_cast<MyTextEdit*>(m_tabBar->currentEditor()->asWidget())
+            : nullptr;
         if (!ed) return;
         // 仅当当前标签页对应刚打开的文件时才应用（防止快速切换标签页错位）
         if (m_tabBar->currentFilePath() != filePath) return;

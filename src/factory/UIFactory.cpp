@@ -45,7 +45,7 @@ QComboBox* UIFactory::createEncodingComboBox(QWidget* parent)
 {
     auto* combo = new QComboBox(parent);
     combo->setMinimumWidth(100);
-    combo->addItems({QStringLiteral("UTF-8"), QStringLiteral("UTF-16"),
+    combo->addItems({QStringLiteral("UTF-8"), QStringLiteral("UTF-8 BOM"), QStringLiteral("UTF-16"),
                      QStringLiteral("GBK"), QStringLiteral("ANSI"), QStringLiteral("GB2312")});
     return combo;
 }

@@ -99,8 +99,9 @@ bool FileOperator::saveFile(const QString& filePath)
 
     // 每次保存重新打开文件写入，不依赖已打开的句柄
     // P3-M03 子项1: 不使用 QIODevice::Text（避免 Qt 自动行尾转换覆盖我们的 EOL 设置）
+    // M3: 必须加 Truncate —— 新内容比原文件短时，残留旧尾部字节会损坏用户文件
     QFile outFile(targetPath);
-    if (!outFile.open(QIODevice::WriteOnly)) {
+    if (!outFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         LOG_DEBUG_S("FileOperator", "saveFile", "保存文件失败:" << targetPath);
         return false;
     }
@@ -158,7 +159,9 @@ void FileOperator::newFile()
 
 bool FileOperator::hasOpenFile() const
 {
-    return m_file.isOpen();
+    // M3: openFile 读完即 close 句柄，m_file.isOpen() 恒为 false，
+    //     以路径非空作为"已打开文件"的真实判定
+    return !m_currentFilePath.isEmpty();
 }
 
 QString FileOperator::currentFilePath() const
@@ -169,8 +172,9 @@ QString FileOperator::currentFilePath() const
 void FileOperator::setEncoding(const QString& encodingName)
 {
     m_encoding = encodingName;
-    // 如果文件已打开，用新编码重新读取
-    if (m_file.isOpen()) {
+    // M3: 同 hasOpenFile —— openFile 后句柄已关闭，m_file.isOpen() 恒 false
+    //     导致"切编码重读文件"分支永不执行
+    if (!m_currentFilePath.isEmpty()) {
         openFile(m_currentFilePath);   // 重新加载
     }
     notifyObservers("encodingChanged", m_encoding);
@@ -231,11 +235,13 @@ QString FileOperator::convertEol(const QString& content) const
         // LF: 保持 \n（无需转换）
         return content;
     }
+    // M3: 先归一化 \r\n → \n，防止内容已含 CRLF 时二次展开成 \r\r\n
+    QString normalized = QString(content).replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
     if (m_eolMode.compare(QStringLiteral("CRLF"), Qt::CaseInsensitive) == 0) {
-        return QString(content).replace(QChar('\n'), QStringLiteral("\r\n"));
+        return normalized.replace(QChar('\n'), QStringLiteral("\r\n"));
     }
     if (m_eolMode.compare(QStringLiteral("CR"), Qt::CaseInsensitive) == 0) {
-        return QString(content).replace(QChar('\n'), QChar('\r'));
+        return normalized.replace(QChar('\n'), QChar('\r'));
     }
     return content;
 }
