@@ -50,8 +50,10 @@ void AIClient::start(const AIProvider& provider, const QList<AIChatMessage>& mes
         emit finished(false, QStringLiteral("已有请求进行中"));
         return;
     }
-    if (provider.baseUrl.trimmed().isEmpty() || provider.apiKey.trimmed().isEmpty()) {
-        emit finished(false, QStringLiteral("请先在 设置 → AI 助手 中配置 BaseUrl 与 API Key"));
+    // M8 stage3: 仅 BaseUrl 必填 —— Ollama 等本地后端无需 API Key；
+    //            云端服务商缺 Key 时由服务端返回 401，错误信息照样可见
+    if (provider.baseUrl.trimmed().isEmpty()) {
+        emit finished(false, QStringLiteral("请先在 设置 → AI 助手 中配置 BaseUrl"));
         return;
     }
 
@@ -75,8 +77,10 @@ void AIClient::start(const AIProvider& provider, const QList<AIChatMessage>& mes
 
     QNetworkRequest req(url);
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    req.setRawHeader(QByteArray("Authorization"),
-                     QByteArray("Bearer ") + provider.apiKey.toUtf8());
+    if (!provider.apiKey.trimmed().isEmpty()) {
+        req.setRawHeader(QByteArray("Authorization"),
+                         QByteArray("Bearer ") + provider.apiKey.toUtf8());
+    }
     req.setTransferTimeout(60000);  // 60s 无数据传输则超时（流式按静默期计算）
 
     m_buffer.clear();

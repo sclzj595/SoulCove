@@ -259,6 +259,10 @@ signals:
     /// @brief 请求在编辑器中替换 (Ctrl+H)
     void replaceRequested();
 
+    /// M8 stage3: 右键菜单 AI 动作（选区/文件上下文由 Widget 层采集注入）
+    void aiExplainRequested();
+    void aiFixBugRequested();
+
     /// @brief 字体大小变化信号（Ctrl+滚轮/设置页/快捷键触发时发射）
     /// 外部（Widget）监听此信号同步到 ConfigManager 和其他编辑器
     void fontSizeChanged(int size);

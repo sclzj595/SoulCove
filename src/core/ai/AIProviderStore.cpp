@@ -31,6 +31,9 @@ QList<AIProviderStore::VendorPreset> AIProviderStore::vendorPresets()
         { QStringLiteral("OpenAI"),
           QStringLiteral("https://api.openai.com/v1"),
           QStringLiteral("gpt-4o-mini") },
+        { QStringLiteral("Ollama (本地)"),
+          QStringLiteral("http://localhost:11434/v1"),
+          QStringLiteral("qwen2.5-coder:7b") },
         { QStringLiteral("自定义"), QString(), QString() },
     };
 }

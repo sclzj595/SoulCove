@@ -1723,6 +1723,13 @@ void MyTextEdit::contextMenuEvent(QContextMenuEvent* e)
     commentAct->setShortcutVisibleInContextMenu(true);
     connect(commentAct, &QAction::triggered, this, &MyTextEdit::toggleLineCommentRequested);
 
+    // ===== M8 stage3: AI 助手动作（子菜单；上下文采集在 Widget 层）=====
+    QMenu* aiMenu = menu->addMenu(tr("AI 助手"));
+    QAction* aiExplainAct = aiMenu->addAction(tr("解释代码"));
+    connect(aiExplainAct, &QAction::triggered, this, &MyTextEdit::aiExplainRequested);
+    QAction* aiFixAct = aiMenu->addAction(tr("修复 Bug"));
+    connect(aiFixAct, &QAction::triggered, this, &MyTextEdit::aiFixBugRequested);
+
     menu->addSeparator();
 
     // ===== 查找 Ctrl+F =====

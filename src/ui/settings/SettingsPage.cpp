@@ -3039,7 +3039,7 @@ void SettingsPage::createAIPage(QWidget* page)
 
     m_aiApiKeyEdit = new QLineEdit(page);
     m_aiApiKeyEdit->setEchoMode(QLineEdit::Password);
-    m_aiApiKeyEdit->setPlaceholderText(tr("仅保存在本地 ai_providers.json"));
+    m_aiApiKeyEdit->setPlaceholderText(tr("云端必填；Ollama 等本地后端可留空（仅保存在本地 ai_providers.json）"));
     addFormRow(tr("API Key:"), m_aiApiKeyEdit);
 
     m_aiModelEdit = new QLineEdit(page);
@@ -3179,8 +3179,9 @@ void SettingsPage::onAiSaveClicked()
     p.enabled = m_aiEnabledCheck->isChecked();
 
     if (p.name.isEmpty()) p.name = QStringLiteral("服务商 %1").arg(row + 1);
-    if (p.baseUrl.isEmpty() || p.apiKey.isEmpty() || p.model.isEmpty()) {
-        m_aiStatusLabel->setText(tr("BaseUrl / API Key / 模型 均不能为空"));
+    // M8 stage3: API Key 可选（Ollama 等本地后端无需鉴权）
+    if (p.baseUrl.isEmpty() || p.model.isEmpty()) {
+        m_aiStatusLabel->setText(tr("BaseUrl / 模型 均不能为空"));
         return;
     }
 
@@ -3218,8 +3219,9 @@ void SettingsPage::onAiTestClicked()
     p.apiKey = m_aiApiKeyEdit->text().trimmed();
     p.model = m_aiModelEdit->text().trimmed();
 
-    if (p.baseUrl.isEmpty() || p.apiKey.isEmpty() || p.model.isEmpty()) {
-        m_aiStatusLabel->setText(tr("请先填写 BaseUrl / API Key / 模型"));
+    // M8 stage3: API Key 可选（Ollama 等本地后端无需鉴权）
+    if (p.baseUrl.isEmpty() || p.model.isEmpty()) {
+        m_aiStatusLabel->setText(tr("请先填写 BaseUrl / 模型"));
         return;
     }
 

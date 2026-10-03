@@ -1378,6 +1378,20 @@ void Widget::bindCurrentEditor(MyTextEdit* editor)
     connect(editor, &MyTextEdit::findRequested,           this, &Widget::onFindRequested, Qt::UniqueConnection);
     connect(editor, &MyTextEdit::replaceRequested,        this, &Widget::onReplaceRequested, Qt::UniqueConnection);
 
+    // M8 stage3: 右键 AI 动作（与命令面板 ai.explain/ai.fixBug 同一链路）
+    connect(editor, &MyTextEdit::aiExplainRequested, this, [this]() {
+        if (!openAiAction(tr("请解释以下代码的功能、逻辑和潜在问题。"))) {
+            ModernDialog::information(this, tr("AI 助手"),
+                tr("没有可用的代码上下文，请先打开文件。"));
+        }
+    }, Qt::UniqueConnection);
+    connect(editor, &MyTextEdit::aiFixBugRequested, this, [this]() {
+        if (!openAiAction(tr("请分析以下代码中的 bug 或隐患，先给出问题清单，再给出修复后的完整代码。"))) {
+            ModernDialog::information(this, tr("AI 助手"),
+                tr("没有可用的代码上下文，请先打开文件。"));
+        }
+    }, Qt::UniqueConnection);
+
     // 右键菜单新增动作
     connect(editor, &MyTextEdit::copyFilePathRequested,    this, &Widget::onCopyFilePath, Qt::UniqueConnection);
     connect(editor, &MyTextEdit::openInFolderRequested,    this, &Widget::onOpenInFolder, Qt::UniqueConnection);
