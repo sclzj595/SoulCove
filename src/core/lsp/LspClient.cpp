@@ -106,14 +106,13 @@ bool LspClient::startServer(const QString& command, const QStringList& args,
             this, &LspClient::onServerFinished);
 
     // 启动进程
-    m_serverProcess->start(command, args);
-
-    if (!m_serverProcess->waitForStarted(5000)) {
-        QString error = tr("LSP 服务器启动失败: %1").arg(m_serverProcess->errorString());
-        emit serverError(error);
-        destroyServerProcess();  // RAII：安全清理
-        return false;
-    }
+    // M3: 信号驱动启动 —— 移除 waitForStarted(5000) 主线程阻塞。
+    //     启动成功 → started → onServerStarted；失败（exe 缺失等，可能同步发出）
+    //     → errorOccurred → onServerErrorOccurred → serverStopped 走自动重连
+    connect(m_serverProcess.get(), &QProcess::started,
+            this, &LspClient::onServerStarted);
+    connect(m_serverProcess.get(), &QProcess::errorOccurred,
+            this, &LspClient::onServerErrorOccurred);
 
     m_initialized = false;
     m_buffer.clear();
@@ -127,22 +126,52 @@ bool LspClient::startServer(const QString& command, const QStringList& args,
     m_lastImplementationRequestId = -1;
     m_requestId = 0;
 
-    LOG_DEBUG_S("LspClient", "startServer", "语言服务器已启动:" << command << args);
-    emit serverStarted();
+    m_serverProcess->start(command, args);
+
+    // QProcess::start 同步打开 IO 通道：Starting 状态下的 write 会缓冲到进程
+    // 就绪后发送，调用方紧随其后的 initialize() 写入是安全的。
+    // 同步 FailedToStart 时 onServerErrorOccurred 已销毁进程对象并触发重连。
+    if (!m_serverProcess || m_serverProcess->state() == QProcess::NotRunning) {
+        return false;   // 启动失败（错误已由 onServerErrorOccurred 上报）
+    }
+
+    LOG_DEBUG_S("LspClient", "startServer", "语言服务器启动中:" << command << args);
     return true;
+}
+
+void LspClient::onServerStarted()
+{
+    LOG_DEBUG_S("LspClient", "onServerStarted", "语言服务器已启动");
+    emit serverStarted();
+}
+
+void LspClient::onServerErrorOccurred(QProcess::ProcessError error)
+{
+    // 运行中崩溃走 onServerFinished 路径（带退出码语义），此处只处理启动/IO 错误
+    if (error == QProcess::Crashed) return;
+
+    const QString detail =
+        (error == QProcess::FailedToStart) ? tr("无法启动（检查服务器路径与权限）")
+        : (error == QProcess::Timedout)    ? tr("操作超时")
+        : (error == QProcess::WriteError)  ? tr("写入错误")
+        : (error == QProcess::ReadError)   ? tr("读取错误")
+                                           : tr("未知错误");
+    LOG_WARN_S("LspClient", "onServerErrorOccurred", "服务器进程错误:" << detail);
+    emit serverError(tr("LSP 服务器错误: %1").arg(detail));
+    destroyServerProcess();  // FailedToStart 后进程对象不可复用（RAII 清理）
+    emit serverStopped();    // 上层自动重连路径（带重启次数上限）
 }
 
 void LspClient::stopServer()
 {
     if (!m_serverProcess) return;
 
-    // 先尝试优雅退出
-    if (m_serverProcess->state() == QProcess::Running) {
-        m_serverProcess->terminate();
-        if (!m_serverProcess->waitForFinished(3000)) {
-            m_serverProcess->kill();
-            m_serverProcess->waitForFinished(2000);
-        }
+    // M3: 主线程禁止 waitForFinished —— 旧实现 terminate+3s+2s 最长阻塞 UI 5 秒。
+    //     断开进程信号防止退出路径误触 onServerFinished→自动重连，
+    //     再直接 kill（Windows: TerminateProcess 立即生效）；QProcess 析构兜底终止。
+    m_serverProcess->disconnect();
+    if (m_serverProcess->state() != QProcess::NotRunning) {
+        m_serverProcess->kill();
     }
 
     // RAII：安全销毁（自动disconnect + 释放内存）

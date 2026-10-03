@@ -3,10 +3,7 @@
 
 #include "interfaces/core/IFileOperator.h"
 #include "core/base/Subject.h"
-#include <QFile>
-#include <QTextStream>
-#include <QStringConverter>
-#include <QTextCodec>
+#include <QString>
 
 /// @brief 文件操作实现类
 /// 基于IFileOperator接口实现文件读写、编码解析、状态管理
@@ -48,18 +45,13 @@ public:
     QString eolMode() const { return m_eolMode; }
 
 private:
-    QFile m_file;
+    // M3: 双轨收敛后不再持有文件句柄，读写全部委托 FileController
     QString m_currentFilePath;
     QString m_encoding;
     bool m_modified = false;
     ContentReader m_contentReader;
     ContentWriter m_contentWriter;
     QString m_eolMode;  // P3-M03 子项1: 行尾类型（"LF"/"CRLF"/"CR"，空表示不强制转换）
-
-    QStringConverter::Encoding resolveEncoding(const QString& encodingName);
-
-    /// P3-M03 子项1: 按 m_eolMode 转换文本行尾
-    QString convertEol(const QString& content) const;
 };
 
 #endif // FILEOPERATOR_H

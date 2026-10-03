@@ -130,7 +130,10 @@ private:
     void handleMessage(const QJsonObject& msg);
 
 private slots:
-    void onServerOutput();           // 读取 stdout
+    void onServerOutput();
+    // M3: 信号驱动启动（移除 waitForStarted 主线程阻塞）
+    void onServerStarted();
+    void onServerErrorOccurred(QProcess::ProcessError error);           // 读取 stdout
     void onServerError();            // 读取 stderr
     void onServerFinished(int exitCode, QProcess::ExitStatus exitStatus);
 };

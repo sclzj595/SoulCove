@@ -103,8 +103,11 @@ EncodingDetectionResult EncodingDetector::detect(const QByteArray& rawData)
         result.confidence = confidence / 100.0;
         break;
     case Encoding::ISO8859_1:
+        // M3: 统计兜底已改判 GB18030，此分支仅在显式构造枚举时可达；
+        //     保留 ISO-8859-1 命名映射，codec 缺失时降级 GB18030
         result.encodingName = QStringLiteral("ISO-8859-1");
         result.codec = QTextCodec::codecForName("ISO-8859-1");
+        if (!result.codec) result.codec = QTextCodec::codecForName("GB18030");
         result.confidence = confidence / 100.0;
         break;
     case Encoding::ASCII:
@@ -308,7 +311,9 @@ EncodingDetector::Encoding EncodingDetector::detectByStatistics(const QByteArray
         }
     }
 
-    // 默认返回 ISO-8859-1（单字节编码，不会出错）
+    // M3: 默认兜底由 ISO-8859-1 改为 GB18030。
+    //     中文环境下 ISO-8859-1 会把 GBK/GB18030 文本解成乱码（且置信度仅 20），
+    //     GB18030 向下兼容 GBK/GB2312，是更安全的最终兜底
     confidence = 20;
-    return Encoding::ISO8859_1;
+    return Encoding::GB18030;
 }

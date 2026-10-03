@@ -1,5 +1,5 @@
 #include "core/fileio/FileOperator.h"
-#include "core/fileio/EncodingDetector.h"
+#include "controller/FileController.h"
 #include "Logger.hpp"
 #include <QDebug>
 #include <QWidget>
@@ -11,70 +11,30 @@ FileOperator::FileOperator(QObject* parent)
 
 // ========== IFileOperator 实现 ==========
 
+// M3: 双轨收敛 —— FileOperator 曾与 FileController 是两套并行读写实现，
+//     编码检测/Truncate/BOM 等修复需在两处同步（已实际漂移出 3 个 bug）。
+//     现读写统一委托 FileController，本类只保留状态管理 + 观察者通知 + 回调解耦。
+
 bool FileOperator::openFile(const QString& filePath)
 {
     if (filePath.isEmpty()) return false;
 
-    // 先关闭之前打开的文件
-    if (m_file.isOpen()) {
-        m_file.close();
-    }
-
-    m_file.setFileName(filePath);
-    if (!m_file.open(QIODevice::ReadOnly)) {
-        LOG_DEBUG_S("FileOperator", "openFile", "打开文件失败:" << filePath);
+    if (!FileController::exists(filePath)) {
+        LOG_DEBUG_S("FileOperator", "openFile", "文件不存在:" << filePath);
         return false;
     }
 
     m_currentFilePath = filePath;
     m_modified = false;
 
-    // 读取原始字节数据
-    QByteArray rawData = m_file.readAll();
-    m_file.close();
+    // 读路径统一走 FileController::readFile（编码检测/BOM 单一实现）
+    QString detected;
+    const QString content = FileController::readFile(filePath, &detected);
 
-    // T8: 自动编码检测 — 当编码为 "Auto" 或 "UTF-8"（默认）时自动检测
-    QString effectiveEncoding = m_encoding;
+    // T8: Auto/UTF-8（默认）时采纳检测结果（含 "UTF-8 (BOM)"）
     if (m_encoding.compare("Auto", Qt::CaseInsensitive) == 0 ||
         m_encoding.compare("UTF-8", Qt::CaseInsensitive) == 0) {
-        EncodingDetectionResult result = EncodingDetector::detect(rawData);
-        if (result.isValid && result.codec) {
-            effectiveEncoding = result.encodingName;
-            m_encoding = effectiveEncoding;  // 更新当前编码
-            LOG_DEBUG_S("FileOperator", "openFile",
-                        "自动检测编码:" << effectiveEncoding
-                        << "置信度:" << result.confidence
-                        << "BOM:" << result.hasBOM);
-        }
-    }
-
-    // 使用检测到的编码解码
-    QString content;
-    if (effectiveEncoding.compare("GBK", Qt::CaseInsensitive) == 0 ||
-        effectiveEncoding.compare("GB18030", Qt::CaseInsensitive) == 0) {
-        // GBK/GB18030 需要 QTextCodec
-        QTextCodec* codec = QTextCodec::codecForName(effectiveEncoding.toUtf8());
-        if (codec) {
-            content = codec->toUnicode(rawData);
-        } else {
-            content = QString::fromUtf8(rawData);
-        }
-    } else if (effectiveEncoding.contains("UTF-16", Qt::CaseInsensitive)) {
-        // UTF-16 需要 QTextCodec
-        QTextCodec* codec = QTextCodec::codecForName(effectiveEncoding.toUtf8());
-        if (codec) {
-            content = codec->toUnicode(rawData);
-        } else {
-            content = QString::fromUtf8(rawData);
-        }
-    } else {
-        // UTF-8 / ASCII 等 — 使用 QStringConverter
-        auto decoder = QStringDecoder(resolveEncoding(effectiveEncoding));
-        if (decoder.isValid()) {
-            content = decoder(rawData);
-        } else {
-            content = QString::fromUtf8(rawData);
-        }
+        if (!detected.isEmpty()) m_encoding = detected;
     }
 
     if (m_contentWriter) {
@@ -84,7 +44,7 @@ bool FileOperator::openFile(const QString& filePath)
     notifyObservers("fileOpened", filePath);
     notifyObservers("encodingChanged", m_encoding);
     LOG_DEBUG_S("FileOperator", "openFile",
-                "文件打开成功:" << filePath << "编码:" << effectiveEncoding);
+                "文件打开成功:" << filePath << "编码:" << m_encoding);
     return true;
 }
 
@@ -96,48 +56,20 @@ bool FileOperator::saveFile(const QString& filePath)
         // 没有路径则触发另存为逻辑
         return false;   // 由调用方处理另存为对话框
     }
+    if (!m_contentReader) return false;
 
-    // 每次保存重新打开文件写入，不依赖已打开的句柄
-    // P3-M03 子项1: 不使用 QIODevice::Text（避免 Qt 自动行尾转换覆盖我们的 EOL 设置）
-    // M3: 必须加 Truncate —— 新内容比原文件短时，残留旧尾部字节会损坏用户文件
-    QFile outFile(targetPath);
-    if (!outFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    // 写路径统一走 FileController::writeFile
+    // （Truncate / BOM 回写 / GBK 缺 codec 拒写 / EOL 归一化均在单一实现内）
+    const QString content = m_contentReader();
+    if (!FileController::writeFile(targetPath, content, m_encoding, m_eolMode)) {
         LOG_DEBUG_S("FileOperator", "saveFile", "保存文件失败:" << targetPath);
         return false;
     }
 
     m_currentFilePath = targetPath;
-
-    // 获取编辑器内容并写入
-    if (m_contentReader) {
-        QString content = m_contentReader();
-
-        // P3-M03 子项1: 按当前 EOL 模式统一行尾
-        content = convertEol(content);
-
-        // GBK特殊处理（需要QTextCodec）
-        if (m_encoding.compare("GBK", Qt::CaseInsensitive) == 0) {
-            QTextCodec* codec = QTextCodec::codecForName("GBK");
-            if (codec) {
-                QByteArray encodedData = codec->fromUnicode(content);
-                outFile.write(encodedData);
-                outFile.flush();
-                outFile.close();
-                m_modified = false;
-                notifyObservers("fileSaved", targetPath);
-                return true;
-            }
-        }
-
-        QTextStream out(&outFile);
-        out.setEncoding(resolveEncoding(m_encoding));
-        out << content;
-    }
-
-    outFile.close();
     m_modified = false;
-    notifyObservers("fileSaved", m_currentFilePath);
-    LOG_DEBUG_S("FileOperator", "saveFile", "文件保存成功:" << m_currentFilePath);
+    notifyObservers("fileSaved", targetPath);
+    LOG_DEBUG_S("FileOperator", "saveFile", "文件保存成功:" << targetPath);
     return true;
 }
 
@@ -197,9 +129,6 @@ void FileOperator::setModified(bool modified)
 
 void FileOperator::closeFile()
 {
-    if (m_file.isOpen()) {
-        m_file.close();
-    }
     m_currentFilePath.clear();
     m_modified = false;
     notifyObservers("fileClosed", QVariant());
@@ -215,33 +144,4 @@ void FileOperator::setContentReader(ContentReader reader)
 void FileOperator::setContentWriter(ContentWriter writer)
 {
     m_contentWriter = std::move(writer);
-}
-
-QStringConverter::Encoding FileOperator::resolveEncoding(const QString& encodingName)
-{
-    auto opt = QStringConverter::encodingForName(encodingName.toUtf8());
-    if (opt.has_value())
-        return opt.value();
-    LOG_DEBUG_S("FileOperator", "resolveEncoding", "不支持的编码格式，默认UTF-8:" << encodingName);
-    return QStringConverter::Utf8;
-}
-
-// P3-M03 子项1: 按当前 EOL 模式统一行尾
-// Qt 内部文本使用单个 '\n'（U+000A）作为段落分隔符，将其转换为指定的 EOL 序列
-QString FileOperator::convertEol(const QString& content) const
-{
-    if (m_eolMode.isEmpty() ||
-        m_eolMode.compare(QStringLiteral("LF"), Qt::CaseInsensitive) == 0) {
-        // LF: 保持 \n（无需转换）
-        return content;
-    }
-    // M3: 先归一化 \r\n → \n，防止内容已含 CRLF 时二次展开成 \r\r\n
-    QString normalized = QString(content).replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
-    if (m_eolMode.compare(QStringLiteral("CRLF"), Qt::CaseInsensitive) == 0) {
-        return normalized.replace(QChar('\n'), QStringLiteral("\r\n"));
-    }
-    if (m_eolMode.compare(QStringLiteral("CR"), Qt::CaseInsensitive) == 0) {
-        return normalized.replace(QChar('\n'), QChar('\r'));
-    }
-    return content;
 }
