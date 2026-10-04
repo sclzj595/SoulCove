@@ -121,12 +121,8 @@ private:
     /// @brief 处理预览区图片点击事件（调用ImageLightBox）
     bool eventFilter(QObject* obj, QEvent* event) override;
 
-    // === P3-M02 子项2+3: CSS 预设与用户自定义 CSS ===
-    /// @brief 暗色主题 CSS 预设（深色背景 + 浅色文字 + 链接 + 代码块）
-    static QString darkCssPreset();
-    /// @brief 浅色主题 CSS 预设（浅色背景 + 深色文字）
-    static QString lightCssPreset();
-    /// @brief 构建预览区 CSS：主题预设 + 用户自定义 CSS（叠加在预设之上）
+    // === P3-M02 子项2+3 → M9 收口: 预览 CSS ===
+    /// @brief 构建预览区 CSS：从当前主题 palette 动态生成 + 用户自定义 CSS 叠加
     QString buildPreviewCss() const;
     /// @brief 应用 CSS 到预览区 QTextDocument
     void applyPreviewCss();

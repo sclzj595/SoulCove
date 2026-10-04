@@ -531,107 +531,78 @@ void MarkdownMode::parseToc()
 // P3-M02 子项2+3: CSS 预设与用户自定义 CSS
 // ============================================================
 
-QString MarkdownMode::darkCssPreset()
-{
-    // 暗色主题 CSS 预设：深色背景 + 浅色文字 + 链接色 + 代码块样式
-    // QTextBrowser 兼容的朴素 CSS2.1（不使用 var()/gradient/box-shadow/:hover/transition）
-    return QStringLiteral(
-        "body { font-family: 'Microsoft YaHei','Segoe UI',sans-serif; font-size: 14px; "
-        "line-height: 1.7; color: #e6e6e6; background-color: #1e1e1e; margin: 0; padding: 8px 16px; }"
-        "h1,h2,h3,h4,h5,h6 { color: #ffffff; font-weight: 600; line-height: 1.3; "
-        "margin-top: 20px; margin-bottom: 8px; }"
-        "h1 { font-size: 24px; border-bottom: 2px solid #9B59B6; padding-bottom: 6px; }"
-        "h2 { font-size: 20px; border-bottom: 1px solid #444; padding-bottom: 4px; }"
-        "h3 { font-size: 17px; }"
-        "h4 { font-size: 15px; }"
-        "h5,h6 { font-size: 14px; color: #aaa; }"
-        "p { margin: 8px 0; }"
-        "a { color: #569CD6; text-decoration: none; }"
-        "strong { font-weight: 700; color: #ffffff; }"
-        "em { font-style: italic; color: #c586c0; }"
-        "del { color: #808080; text-decoration: line-through; }"
-        "code { background-color: #2d2d30; color: #ce9178; padding: 2px 5px; border-radius: 3px; "
-        "font-family: 'Consolas','Courier New',monospace; font-size: 13px; }"
-        "pre { background-color: #1e1e1e; color: #d4d4d4; padding: 12px; "
-        "border: 1px solid #3c3c3c; border-radius: 6px; margin: 10px 0; }"
-        "pre code { background-color: transparent; color: #d4d4d4; padding: 0; border: none; "
-        "display: block; white-space: pre; font-size: 13px; line-height: 1.5; }"
-        "blockquote { border-left: 4px solid #569CD6; padding: 6px 14px; margin: 10px 0; "
-        "color: #aaa; background-color: #252526; }"
-        "table { border-collapse: collapse; margin: 10px 0; }"
-        "th,td { border: 1px solid #3c3c3c; padding: 6px 12px; }"
-        "th { background-color: #2d2d30; color: #569CD6; font-weight: 600; }"
-        "hr { border: none; border-top: 1px solid #3c3c3c; margin: 18px 0; }"
-        "ul,ol { padding-left: 24px; margin: 6px 0; }"
-        "li { margin: 3px 0; }"
-        "img { max-width: 100%; }"
-        ".hl-kw { color: #569CD6; font-weight: 600; }"
-        ".hl-str { color: #CE9178; }"
-        ".hl-num { color: #B5CEA8; }"
-        ".hl-cmt { color: #6A9955; font-style: italic; }"
-        ".hl-pp { color: #C586C0; }"
-        ".hl-type { color: #4EC9B0; }"
-        ".hl-fn { color: #DCDCAA; }"
-    );
-}
-
-QString MarkdownMode::lightCssPreset()
-{
-    // 浅色主题 CSS 预设：浅色背景 + 深色文字 + 链接色 + 代码块样式
-    return QStringLiteral(
-        "body { font-family: 'Microsoft YaHei','Segoe UI',sans-serif; font-size: 14px; "
-        "line-height: 1.7; color: #2c3e50; background-color: #ffffff; margin: 0; padding: 8px 16px; }"
-        "h1,h2,h3,h4,h5,h6 { color: #2c3e50; font-weight: 600; line-height: 1.3; "
-        "margin-top: 20px; margin-bottom: 8px; }"
-        "h1 { font-size: 24px; border-bottom: 2px solid #9B59B6; padding-bottom: 6px; color: #8e44ad; }"
-        "h2 { font-size: 20px; border-bottom: 1px solid #e0d0e8; padding-bottom: 4px; color: #9B59B6; }"
-        "h3 { font-size: 17px; color: #7d3c98; }"
-        "h4 { font-size: 15px; color: #666; }"
-        "h5,h6 { font-size: 14px; color: #888; }"
-        "p { margin: 8px 0; }"
-        "a { color: #9B59B6; text-decoration: none; }"
-        "strong { font-weight: 700; color: #2c3e50; }"
-        "em { font-style: italic; color: #9B59B6; }"
-        "del { color: #999; text-decoration: line-through; }"
-        "code { background-color: #f0eef0; color: #c7254e; padding: 2px 5px; border-radius: 3px; "
-        "font-family: 'Consolas','Courier New',monospace; font-size: 13px; }"
-        "pre { background-color: #f6f8fa; color: #24292e; padding: 12px; "
-        "border: 1px solid #e1e4e8; border-radius: 6px; margin: 10px 0; }"
-        "pre code { background-color: transparent; color: #24292e; padding: 0; border: none; "
-        "display: block; white-space: pre; font-size: 13px; line-height: 1.5; }"
-        "blockquote { border-left: 4px solid #9B59B6; padding: 6px 14px; margin: 10px 0; "
-        "color: #666; background-color: #faf8fa; }"
-        "table { border-collapse: collapse; margin: 10px 0; }"
-        "th,td { border: 1px solid #e1e4e8; padding: 6px 12px; }"
-        "th { background-color: #f6f8fa; color: #9B59B6; font-weight: 600; }"
-        "hr { border: none; border-top: 1px solid #e1e4e8; margin: 18px 0; }"
-        "ul,ol { padding-left: 24px; margin: 6px 0; }"
-        "li { margin: 3px 0; }"
-        "img { max-width: 100%; }"
-        ".hl-kw { color: #0000FF; font-weight: 600; }"
-        ".hl-str { color: #A31515; }"
-        ".hl-num { color: #098658; }"
-        ".hl-cmt { color: #008000; font-style: italic; }"
-        ".hl-pp { color: #AF00DB; }"
-        ".hl-type { color: #267F99; }"
-        ".hl-fn { color: #795E26; }"
-    );
-}
-
 QString MarkdownMode::buildPreviewCss() const
 {
-    // P3-M02 子项3: 根据当前主题选择预设 CSS
-    // 亮/暗主题判定 (与 ThemeManager/MaddyParser 一致: bgEditor.lightness() > 128)
+    // M9 收口: 预览 CSS 从当前主题 palette 动态生成。
+    // 旧实现只在"暗/浅"两套硬编码预设里按 bgEditor 亮度二选一，
+    // 暗黑紫/粉紫等多主题下预览配色与主题脱节（用户反馈项）。
     const auto& p = ThemeManager::instance().currentPalette();
-    bool isLight = p.bgEditor.lightness() > 128;
-    QString preset = isLight ? lightCssPreset() : darkCssPreset();
+    const QString accent = p.accentPrimary.name();
+    // 层次底色：均取主题内已配套的"错一档"表面色
+    const QString inlineCodeBg = p.bgTabInactive.name();
+    const QString preBg = p.bgInput.name();
+    const QString quoteBg = p.currentLineBg.name();
 
-    // P3-M02 子项2: 用户自定义 CSS 叠加在主题预设之上（用户 CSS 优先级更高）
+    QString css = QStringLiteral(
+        "body { font-family: 'Microsoft YaHei','Segoe UI',sans-serif; font-size: 14px; "
+        "line-height: 1.7; color: %1; background-color: %2; margin: 0; padding: 8px 16px; }"
+        "h1,h2,h3,h4,h5,h6 { color: %1; font-weight: 600; line-height: 1.3; "
+        "margin-top: 20px; margin-bottom: 8px; }"
+        "h1 { font-size: 24px; border-bottom: 2px solid %3; padding-bottom: 6px; color: %3; }"
+        "h2 { font-size: 20px; border-bottom: 1px solid %4; padding-bottom: 4px; color: %3; }"
+        "h3 { font-size: 17px; color: %3; }"
+        "h4 { font-size: 15px; color: %5; }"
+        "h5,h6 { font-size: 14px; color: %5; }"
+        "p { margin: 8px 0; }"
+        "a { color: %3; text-decoration: none; }"
+        "strong { font-weight: 700; color: %1; }"
+        "em { font-style: italic; color: %3; }"
+        "del { color: %5; text-decoration: line-through; }"
+        "code { background-color: %6; color: %7; padding: 2px 5px; border-radius: 3px; "
+        "font-family: 'Consolas','Courier New',monospace; font-size: 13px; }"
+        "pre { background-color: %8; color: %1; padding: 12px; "
+        "border: 1px solid %4; border-radius: 6px; margin: 10px 0; }"
+        "pre code { background-color: transparent; color: %1; padding: 0; border: none; "
+        "display: block; white-space: pre; font-size: 13px; line-height: 1.5; }"
+        "blockquote { border-left: 4px solid %3; padding: 6px 14px; margin: 10px 0; "
+        "color: %5; background-color: %9; }"
+        "table { border-collapse: collapse; margin: 10px 0; }"
+        "th,td { border: 1px solid %4; padding: 6px 12px; }"
+        "th { background-color: %6; color: %3; font-weight: 600; }"
+        "hr { border: none; border-top: 1px solid %4; margin: 18px 0; }"
+        "ul,ol { padding-left: 24px; margin: 6px 0; }"
+        "li { margin: 3px 0; }"
+        "img { max-width: 100%; }"
+        ".hl-kw { color: %10; font-weight: 600; }"
+        ".hl-str { color: %7; }"
+        ".hl-num { color: %11; }"
+        ".hl-cmt { color: %12; font-style: italic; }"
+        ".hl-pp { color: %13; }"
+        ".hl-type { color: %14; }"
+        ".hl-fn { color: %15; }"
+    )
+        .arg(p.fgPrimary.name())          // %1 正文/标题基色
+        .arg(p.bgEditor.name())           // %2 预览底色
+        .arg(accent)                      // %3 强调（标题/链接/引用边框）
+        .arg(p.borderDefault.name())      // %4 边框
+        .arg(p.fgSecondary.name())        // %5 次要文字
+        .arg(inlineCodeBg)                // %6 行内代码/表头底色
+        .arg(p.syntax.string.name())      // %7 行内代码文字 + .hl-str
+        .arg(preBg)                       // %8 代码块底色
+        .arg(quoteBg)                     // %9 引用块底色
+        .arg(p.syntax.keyword.name())     // %10
+        .arg(p.syntax.number.name())      // %11
+        .arg(p.syntax.comment.name())     // %12
+        .arg(p.syntax.preprocessor.name())// %13
+        .arg(p.syntax.type.name())        // %14
+        .arg(p.syntax.function.name());   // %15
+
+    // P3-M02 子项2: 用户自定义 CSS 叠加（用户 CSS 优先级更高）
     QString userCss = ConfigManager::instance().markdownCustomCss();
     if (!userCss.isEmpty()) {
-        return preset + QStringLiteral("\n/* === 用户自定义 CSS === */\n") + userCss;
+        return css + QStringLiteral("\n/* === 用户自定义 CSS === */\n") + userCss;
     }
-    return preset;
+    return css;
 }
 
 void MarkdownMode::applyPreviewCss()
