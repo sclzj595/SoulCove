@@ -1,0 +1,24 @@
+{
+  "items": [
+    {
+      "id": "com.soulcove.wordcount",
+      "name": "WordCount 字数统计",
+      "version": "1.0.0",
+      "type": "plugin",
+      "author": "scStudio",
+      "description": "统计当前文档的字符/单词/行数，支持导出到插件数据目录。命令面板搜索 wordcount 使用：plugin.wordcount.stats 统计、plugin.wordcount.export 导出；保存文件时自动统计。",
+      "downloadUrl": "https://github.com/sclzj595/SoulCove-market/raw/main/plugins/libwordcount_plugin.dll",
+      "fileName": "libwordcount_plugin.dll"
+    },
+    {
+      "id": "com.soulcove.hello",
+      "name": "Hello 示例插件",
+      "version": "1.0.0",
+      "type": "plugin",
+      "author": "scStudio",
+      "description": "最小合规插件示例：注册 plugin.hello.greet 命令，演示插件生命周期与事件订阅。",
+      "downloadUrl": "https://github.com/sclzj595/SoulCove-market/raw/main/plugins/libhello_plugin.dll",
+      "fileName": "libhello_plugin.dll"
+    }
+  ]
+}

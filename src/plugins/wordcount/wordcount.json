@@ -1,0 +1,5 @@
+{
+    "name": "com.soulcove.wordcount",
+    "version": "1.0.0",
+    "description": "字数统计插件（M9 市场安装流程案例）：统计字符/单词/行数，支持导出"
+}

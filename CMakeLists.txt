@@ -490,6 +490,17 @@ set_target_properties(hello_plugin PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:scIDE>/plugins"
 )
 
+# ====== M9 市场案例: wordcount 插件（与 hello_plugin 同规格，演示市场安装链路）======
+add_library(wordcount_plugin MODULE
+    src/plugins/wordcount/WordCountPlugin.cpp
+)
+target_link_libraries(wordcount_plugin PRIVATE Qt6::Core)
+set_target_properties(wordcount_plugin PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:scIDE>/plugins"
+    LIBRARY_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:scIDE>/plugins"
+    ARCHIVE_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:scIDE>/plugins"
+)
+
 # Windows平台:复制运行时依赖的Qt动态库到输出目录
 # 注：三个可执行文件共享同一输出目录，DLL 只需拷贝一次（绑定到 scIDE 目标）
 if(WIN32)
