@@ -501,6 +501,21 @@ set_target_properties(wordcount_plugin PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:scIDE>/plugins"
 )
 
+# ====== 插件 SDK 头文件同步（M9：第三方开发者拿到的接口与宿主编译所用永远一致）======
+# 接口唯一事实源在 src/interfaces/plugin/；每次构建自动拷贝到 sdk/include/soulcove/
+set(PLUGIN_SDK_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/interfaces/plugin")
+set(PLUGIN_SDK_DST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/sdk/include/soulcove")
+add_custom_target(plugin_sdk_sync
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${PLUGIN_SDK_DST_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${PLUGIN_SDK_SRC_DIR}/IPlugin.h"
+        "${PLUGIN_SDK_SRC_DIR}/IPluginAPI.h"
+        "${PLUGIN_SDK_DST_DIR}/"
+    COMMENT "Syncing plugin SDK headers -> sdk/include/soulcove/"
+    VERBATIM
+)
+add_dependencies(scCore plugin_sdk_sync)
+
 # Windows平台:复制运行时依赖的Qt动态库到输出目录
 # 注：三个可执行文件共享同一输出目录，DLL 只需拷贝一次（绑定到 scIDE 目标）
 if(WIN32)
