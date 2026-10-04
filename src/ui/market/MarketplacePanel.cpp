@@ -9,6 +9,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -128,7 +129,13 @@ void MarketplacePanel::rebuildList(const QString& filter)
                                 : (it.type == QLatin1String("theme")) ? tr("主题")
                                 : (it.type == QLatin1String("snippet")) ? tr("片段")
                                 : it.type;
-        m_itemList->addItem(QStringLiteral("%1  v%2  [%3]  —  %4").arg(it.name, it.version, typeTag, it.author));
+        // M9 stage2: 已安装标记（plugins/ 目录存在同名文件）
+        const bool installed = QFileInfo::exists(
+            pluginsDir() + QStringLiteral("/") + QFileInfo(it.fileName).fileName());
+        m_itemList->addItem(QStringLiteral("%1  v%2  [%3]%4  —  %5")
+                                .arg(it.name, it.version, typeTag,
+                                     installed ? QStringLiteral(" ✓已安装") : QString(),
+                                     it.author));
     }
     if (m_itemList->count() > 0) m_itemList->setCurrentRow(0);
     else onSelectionChanged();
@@ -224,6 +231,20 @@ void MarketplacePanel::onInstallClicked()
         if (data.isEmpty()) {
             setStatus(tr("✗ 下载内容为空"));
             return;
+        }
+
+        // M9 stage2: SHA-256 完整性校验（注册表条目可选提供 sha256 字段）
+        if (!it->sha256.isEmpty()) {
+            const QString actual = QString::fromLatin1(
+                QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
+            if (actual != it->sha256) {
+                setStatus(tr("✗ 校验和不匹配（预期 %1，实际 %2）——下载可能被篡改，已放弃安装")
+                              .arg(it->sha256.left(16) + QStringLiteral("…"),
+                                   actual.left(16) + QStringLiteral("…")));
+                LOG_ERROR("[MarketplacePanel] SHA-256 mismatch:" << it->id.toStdString());
+                return;
+            }
+            setStatus(tr("校验和验证通过，正在写入…"));
         }
 
         // 文件名安全：只取文件名部分，拒绝路径穿越

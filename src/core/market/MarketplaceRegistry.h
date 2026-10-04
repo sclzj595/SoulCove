@@ -8,7 +8,7 @@
 
 class QNetworkAccessManager;
 
-/// @brief 市场条目（M9 stage1）
+/// @brief 市场条目（M9 stage1；stage2 增加可选 sha256 下载校验）
 struct MarketItem
 {
     QString id;             ///< 唯一标识
@@ -19,6 +19,7 @@ struct MarketItem
     QString description;
     QString downloadUrl;    ///< 单文件直链
     QString fileName;       ///< 安装后的文件名（含扩展名）
+    QString sha256;         ///< 可选：下载内容 SHA-256（hex 小写，缺省不校验）
 
     bool isValid() const
     {
@@ -41,7 +42,11 @@ public:
     explicit MarketplaceRegistry(QObject* parent = nullptr);
 
     /// 异步拉取注册表（fetched / failed 回调）
-    void fetch(const QUrl& url = defaultUrl());
+    /// M9 stage2 多源回退：显式 url → 用户本地源（AppData/marketplace.json）→ 默认远程源
+    void fetch(const QUrl& url = QUrl());
+
+    /// 用户本地源路径（存在即作为远程失败后的兜底）
+    static QString localFallbackPath();
 
     const QList<MarketItem>& items() const { return m_items; }
 
