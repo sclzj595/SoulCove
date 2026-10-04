@@ -39,6 +39,10 @@ private:
     const MarketItem* selectedItem() const;
     QString pluginsDir() const;
     void setStatus(const QString& text);
+    // M9 stage3: 版本比较与更新检查
+    QString installedVersion(const MarketItem& it) const;  ///< 已安装版本（未安装返回空）
+    static int compareVersions(const QString& a, const QString& b);  ///< >0: a更新
+    int countUpdatable() const;
 
     MarketplaceRegistry m_registry;
     QList<MarketItem> m_items;              ///< 全量条目（搜索过滤前）

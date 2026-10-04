@@ -1,5 +1,6 @@
 #include "ui/market/MarketplacePanel.h"
 #include "core/plugin/PluginManager.h"
+#include "core/snippet/SnippetManager.h"
 #include "core/config/ThemeManager.h"
 #include "Logger.hpp"
 
@@ -9,6 +10,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QCoreApplication>
+#include <QStandardPaths>
 #include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QNetworkAccessManager>
@@ -129,16 +131,64 @@ void MarketplacePanel::rebuildList(const QString& filter)
                                 : (it.type == QLatin1String("theme")) ? tr("主题")
                                 : (it.type == QLatin1String("snippet")) ? tr("片段")
                                 : it.type;
-        // M9 stage2: 已安装标记（plugins/ 目录存在同名文件）
-        const bool installed = QFileInfo::exists(
-            pluginsDir() + QStringLiteral("/") + QFileInfo(it.fileName).fileName());
+        // M9 stage3: 已安装 / 可更新标记（按版本比较）
+        QString stateTag;
+        const QString instVer = installedVersion(it);
+        if (!instVer.isEmpty()) {
+            if (compareVersions(it.version, instVer) > 0)
+                stateTag = QStringLiteral(" ⬆可更新 v%1→v%2").arg(instVer, it.version);
+            else
+                stateTag = QStringLiteral(" ✓已安装");
+        }
         m_itemList->addItem(QStringLiteral("%1  v%2  [%3]%4  —  %5")
-                                .arg(it.name, it.version, typeTag,
-                                     installed ? QStringLiteral(" ✓已安装") : QString(),
-                                     it.author));
+                                .arg(it.name, it.version, typeTag, stateTag, it.author));
     }
     if (m_itemList->count() > 0) m_itemList->setCurrentRow(0);
     else onSelectionChanged();
+
+    // 更新检查汇总提示
+    const int updatable = countUpdatable();
+    if (updatable > 0) {
+        setStatus(tr("已加载 %1 个扩展，其中 %2 个有可用更新（选中后点「安装」覆盖更新）")
+                      .arg(m_items.size()).arg(updatable));
+    }
+}
+
+// ============================================================
+// M9 stage3: 版本比较与更新检查
+// ============================================================
+
+QString MarketplacePanel::installedVersion(const MarketItem& it) const
+{
+    if (it.type != QLatin1String("plugin")) return QString();
+    for (const PluginRecord& rec : PluginManager::instance().plugins()) {
+        if (QFileInfo(rec.filePath).fileName().compare(it.fileName, Qt::CaseInsensitive) == 0) {
+            return rec.version;
+        }
+    }
+    return QString();
+}
+
+int MarketplacePanel::compareVersions(const QString& a, const QString& b)
+{
+    const QStringList pa = a.split(QLatin1Char('.'));
+    const QStringList pb = b.split(QLatin1Char('.'));
+    for (int i = 0; i < qMax(pa.size(), pb.size()); ++i) {
+        const int va = (i < pa.size()) ? pa[i].toInt() : 0;
+        const int vb = (i < pb.size()) ? pb[i].toInt() : 0;
+        if (va != vb) return va - vb;
+    }
+    return 0;
+}
+
+int MarketplacePanel::countUpdatable() const
+{
+    int n = 0;
+    for (const MarketItem& it : m_items) {
+        const QString instVer = installedVersion(it);
+        if (!instVer.isEmpty() && compareVersions(it.version, instVer) > 0) ++n;
+    }
+    return n;
 }
 
 void MarketplacePanel::onSelectionChanged()
@@ -186,9 +236,11 @@ QString MarketplacePanel::pluginsDir() const
 void MarketplacePanel::updateButtons()
 {
     const MarketItem* it = selectedItem();
-    const bool installable = it && it->type == QLatin1String("plugin");
+    // M9 stage3: plugin 与 snippet 均可安装
+    const bool installable = it && (it->type == QLatin1String("plugin")
+                                    || it->type == QLatin1String("snippet"));
     m_btnInstall->setEnabled(installable);
-    m_btnUninstall->setEnabled(installable);
+    m_btnUninstall->setEnabled(it && it->type == QLatin1String("plugin"));
 }
 
 // ============================================================
@@ -199,8 +251,9 @@ void MarketplacePanel::onInstallClicked()
 {
     const MarketItem* it = selectedItem();
     if (!it) return;
-    if (it->type != QLatin1String("plugin")) {
-        setStatus(tr("stage1 暂只支持插件在线安装（%1 将在后续版本支持）").arg(it->type));
+    if (it->type != QLatin1String("plugin") && it->type != QLatin1String("snippet")) {
+        // M9 stage3: theme 需要宿主侧自定义主题文件加载器（ThemeManager 尚无该机制），维持占位
+        setStatus(tr("「%1」类型的在线安装将在后续版本支持").arg(it->type));
         return;
     }
 
@@ -247,6 +300,28 @@ void MarketplacePanel::onInstallClicked()
             setStatus(tr("校验和验证通过，正在写入…"));
         }
 
+        // ===== M9 stage3: 代码片段安装（下载 → VSCode JSON 导入 SnippetManager）=====
+        if (it->type == QLatin1String("snippet")) {
+            const QString tmpPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
+                                    + QStringLiteral("/soulcove_market_snippet.json");
+            QFile tmp(tmpPath);
+            if (!tmp.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                setStatus(tr("✗ 临时文件写入失败"));
+                return;
+            }
+            tmp.write(data);
+            tmp.close();
+            if (SnippetManager::instance().importFromVscodeJson(tmpPath)) {
+                tmp.remove();
+                setStatus(tr("✓ 片段包「%1」已导入（工具 → 代码片段管理 可查看/编辑）").arg(it->name));
+            } else {
+                setStatus(tr("✗ 片段导入失败（检查 JSON 是否为 VSCode snippet 格式）"));
+            }
+            rebuildList(m_searchEdit->text());
+            return;
+        }
+
+        // ===== 插件安装 =====
         // 文件名安全：只取文件名部分，拒绝路径穿越
         const QString safeName = QFileInfo(it->fileName).fileName();
         if (safeName.isEmpty()) {
