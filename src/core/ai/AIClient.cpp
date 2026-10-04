@@ -44,6 +44,15 @@ void AIClient::cancel()
     }
 }
 
+// M8 收口: 协议按 baseUrl 域名自动识别 —— 用户无需额外配置字段
+AIClient::Protocol AIClient::detectProtocol(const QString& baseUrl)
+{
+    const QString host = QUrl(baseUrl).host().toLower();
+    if (host.endsWith(QStringLiteral("anthropic.com"))) return Protocol::Anthropic;
+    if (host.startsWith(QStringLiteral("generativelanguage"))) return Protocol::Gemini;
+    return Protocol::OpenAI;
+}
+
 void AIClient::start(const AIProvider& provider, const QList<AIChatMessage>& messages, bool stream)
 {
     if (m_reply) {
@@ -57,29 +66,104 @@ void AIClient::start(const AIProvider& provider, const QList<AIChatMessage>& mes
         return;
     }
 
-    // URL：BaseUrl + /chat/completions（容忍末尾斜杠）
+    m_protocol = detectProtocol(provider.baseUrl.trimmed());
+    const QString apiKey = provider.apiKey.trimmed();
+
     QUrl url(provider.baseUrl.trimmed());
-    QString path = url.path();
-    if (!path.endsWith(QStringLiteral("/"))) path += QStringLiteral("/");
-    url.setPath(path + QStringLiteral("chat/completions"));
-
     QJsonObject body;
-    body.insert(QStringLiteral("model"), provider.model);
-    QJsonArray msgs;
-    for (const AIChatMessage& m : messages) {
-        QJsonObject o;
-        o.insert(QStringLiteral("role"), m.role);
-        o.insert(QStringLiteral("content"), m.content);
-        msgs.append(o);
-    }
-    body.insert(QStringLiteral("messages"), msgs);
-    body.insert(QStringLiteral("stream"), stream);
+    QNetworkRequest req;
 
-    QNetworkRequest req(url);
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    if (!provider.apiKey.trimmed().isEmpty()) {
-        req.setRawHeader(QByteArray("Authorization"),
-                         QByteArray("Bearer ") + provider.apiKey.toUtf8());
+    if (m_protocol == Protocol::Anthropic) {
+        // Anthropic Messages API：POST {BaseUrl}/v1/messages
+        QString path = url.path();
+        if (!path.endsWith(QStringLiteral("/"))) path += QStringLiteral("/");
+        url.setPath(path + QStringLiteral("v1/messages"));
+
+        // system 是顶层独立字段；messages 仅 user/assistant；max_tokens 必填
+        QJsonArray msgs;
+        QString systemText;
+        for (const AIChatMessage& m : messages) {
+            if (m.role == QStringLiteral("system")) { systemText = m.content; continue; }
+            QJsonObject o;
+            o.insert(QStringLiteral("role"), m.role);
+            o.insert(QStringLiteral("content"), m.content);
+            msgs.append(o);
+        }
+        body.insert(QStringLiteral("model"), provider.model);
+        body.insert(QStringLiteral("max_tokens"), 4096);
+        body.insert(QStringLiteral("stream"), stream);
+        body.insert(QStringLiteral("messages"), msgs);
+        if (!systemText.isEmpty())
+            body.insert(QStringLiteral("system"), systemText);
+
+        req.setUrl(url);
+        req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+        if (!apiKey.isEmpty())
+            req.setRawHeader(QByteArray("x-api-key"), apiKey.toUtf8());
+        req.setRawHeader(QByteArray("anthropic-version"), QByteArray("2023-06-01"));
+    } else if (m_protocol == Protocol::Gemini) {
+        // Gemini Generative Language API：
+        //   非流式 POST {BaseUrl}/v1beta/models/{model}:generateContent
+        //   流式   POST {BaseUrl}/v1beta/models/{model}:streamGenerateContent?alt=sse
+        QString path = url.path();
+        while (path.endsWith(QStringLiteral("/"))) path.chop(1);
+        url.setPath(path + QStringLiteral("/v1beta/models/") + provider.model
+                    + (stream ? QStringLiteral(":streamGenerateContent")
+                              : QStringLiteral(":generateContent")));
+        if (stream) url.setQuery(QStringLiteral("alt=sse"));
+
+        // role 映射：assistant→model；system→顶层 system_instruction
+        QJsonArray contents;
+        QJsonArray sysParts;
+        bool hasSystem = false;
+        for (const AIChatMessage& m : messages) {
+            if (m.role == QStringLiteral("system")) {
+                QJsonObject p; p.insert(QStringLiteral("text"), m.content);
+                sysParts.append(p);
+                hasSystem = true;
+                continue;
+            }
+            QJsonObject part; part.insert(QStringLiteral("text"), m.content);
+            QJsonObject o;
+            o.insert(QStringLiteral("role"),
+                     m.role == QStringLiteral("assistant") ? QStringLiteral("model")
+                                                           : QStringLiteral("user"));
+            o.insert(QStringLiteral("parts"), QJsonArray{ part });
+            contents.append(o);
+        }
+        body.insert(QStringLiteral("contents"), contents);
+        if (hasSystem) {
+            QJsonObject si; si.insert(QStringLiteral("parts"), sysParts);
+            body.insert(QStringLiteral("system_instruction"), si);
+        }
+
+        req.setUrl(url);
+        req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+        if (!apiKey.isEmpty())
+            req.setRawHeader(QByteArray("x-goog-api-key"), apiKey.toUtf8());
+    } else {
+        // OpenAI 兼容（默认）：POST {BaseUrl}/chat/completions（容忍末尾斜杠）
+        QString path = url.path();
+        if (!path.endsWith(QStringLiteral("/"))) path += QStringLiteral("/");
+        url.setPath(path + QStringLiteral("chat/completions"));
+
+        QJsonArray msgs;
+        for (const AIChatMessage& m : messages) {
+            QJsonObject o;
+            o.insert(QStringLiteral("role"), m.role);
+            o.insert(QStringLiteral("content"), m.content);
+            msgs.append(o);
+        }
+        body.insert(QStringLiteral("model"), provider.model);
+        body.insert(QStringLiteral("messages"), msgs);
+        body.insert(QStringLiteral("stream"), stream);
+
+        req.setUrl(url);
+        req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+        if (!apiKey.isEmpty()) {
+            req.setRawHeader(QByteArray("Authorization"),
+                             QByteArray("Bearer ") + apiKey.toUtf8());
+        }
     }
     req.setTransferTimeout(60000);  // 60s 无数据传输则超时（流式按静默期计算）
 
@@ -91,7 +175,9 @@ void AIClient::start(const AIProvider& provider, const QList<AIChatMessage>& mes
     m_reply = m_nam->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(m_reply, &QNetworkReply::readyRead, this, &AIClient::onReadyRead);
     connect(m_reply, &QNetworkReply::finished, this, &AIClient::onFinish);
-    LOG_DEBUG_S("AIClient", "start", "请求" << url.toString().toStdString() << " stream=" << stream);
+    LOG_DEBUG_S("AIClient", "start", "请求" << url.toString().toStdString()
+                << " stream=" << stream
+                << " protocol=" << static_cast<int>(m_protocol));
 }
 
 void AIClient::onReadyRead()
@@ -121,8 +207,38 @@ void AIClient::processSseLine(const QByteArray& line)
     QJsonParseError err{};
     QJsonDocument doc = QJsonDocument::fromJson(payload, &err);
     if (err.error != QJsonParseError::NoError || !doc.isObject()) return;
+    const QJsonObject root = doc.object();
 
-    const QJsonArray choices = doc.object().value(QStringLiteral("choices")).toArray();
+    if (m_protocol == Protocol::Anthropic) {
+        // 事件流：content_block_delta.delta.text 增量；message_stop 结束
+        const QString type = root.value(QStringLiteral("type")).toString();
+        if (type == QStringLiteral("content_block_delta")) {
+            const QString delta = root.value(QStringLiteral("delta")).toObject()
+                                      .value(QStringLiteral("text")).toString();
+            if (!delta.isEmpty()) emit deltaReceived(delta);
+        } else if (type == QStringLiteral("message_stop")) {
+            m_done = true;
+        }
+        // error 事件 → onFinish 统一按 HTTP 错误/错误体处理
+        return;
+    }
+
+    if (m_protocol == Protocol::Gemini) {
+        // data: {candidates:[{content:{parts:[{text}...]}}]} —— 无 [DONE]，流自然结束
+        const QJsonArray candidates = root.value(QStringLiteral("candidates")).toArray();
+        if (candidates.isEmpty()) return;
+        const QJsonArray parts = candidates.first().toObject()
+                                     .value(QStringLiteral("content")).toObject()
+                                     .value(QStringLiteral("parts")).toArray();
+        for (const QJsonValue& p : parts) {
+            const QString delta = p.toObject().value(QStringLiteral("text")).toString();
+            if (!delta.isEmpty()) emit deltaReceived(delta);
+        }
+        return;
+    }
+
+    // OpenAI 兼容
+    const QJsonArray choices = root.value(QStringLiteral("choices")).toArray();
     if (choices.isEmpty()) return;
     const QString delta = choices.first().toObject()
                               .value(QStringLiteral("delta")).toObject()
@@ -173,14 +289,36 @@ void AIClient::onFinish()
         }
         emit finished(true, QString());
     } else {
+        // 非流式整体解析（按协议）
         QJsonDocument doc = QJsonDocument::fromJson(body);
         QString content;
         if (doc.isObject()) {
-            const QJsonArray choices = doc.object().value(QStringLiteral("choices")).toArray();
-            if (!choices.isEmpty()) {
-                content = choices.first().toObject()
-                              .value(QStringLiteral("message")).toObject()
-                              .value(QStringLiteral("content")).toString();
+            const QJsonObject root = doc.object();
+            if (m_protocol == Protocol::Anthropic) {
+                // {content:[{type:"text",text:...},...]} —— 拼接全部 text 块
+                const QJsonArray blocks = root.value(QStringLiteral("content")).toArray();
+                for (const QJsonValue& b : blocks) {
+                    const QJsonObject o = b.toObject();
+                    if (o.value(QStringLiteral("type")).toString() == QLatin1String("text"))
+                        content += o.value(QStringLiteral("text")).toString();
+                }
+            } else if (m_protocol == Protocol::Gemini) {
+                // {candidates:[{content:{parts:[{text}...]}}]}
+                const QJsonArray candidates = root.value(QStringLiteral("candidates")).toArray();
+                if (!candidates.isEmpty()) {
+                    const QJsonArray parts = candidates.first().toObject()
+                                                 .value(QStringLiteral("content")).toObject()
+                                                 .value(QStringLiteral("parts")).toArray();
+                    for (const QJsonValue& p : parts)
+                        content += p.toObject().value(QStringLiteral("text")).toString();
+                }
+            } else {
+                const QJsonArray choices = root.value(QStringLiteral("choices")).toArray();
+                if (!choices.isEmpty()) {
+                    content = choices.first().toObject()
+                                  .value(QStringLiteral("message")).toObject()
+                                  .value(QStringLiteral("content")).toString();
+                }
             }
         }
         if (content.isEmpty()) {
