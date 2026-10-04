@@ -53,7 +53,9 @@ GhostText::GhostText(QTextEdit* editor, QObject* parent)
 
 GhostText::~GhostText()
 {
-    if (isActive()) {
+    // M3 批次3: 析构守卫 —— GhostText 作为编辑器子对象，析构时文档可能已销毁；
+    // QTextCursor 对已销毁文档的写操作不保证安全，双重判空兜底
+    if (m_editor && !m_ghostCursor.isNull() && isActive()) {
         m_inserting = true;
         m_ghostCursor.removeSelectedText();
     }

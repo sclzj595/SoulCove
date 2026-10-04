@@ -36,6 +36,7 @@ class IEditorEdit;
 class SettingsPage;
 class SshConfigPanel;
 class AIChatPanel;   // M8: AI 助手对话面板
+class MarketplacePanel;  // M9: 扩展市场面板
 class DiffViewer;
 class GitPanel;
 class LspCoordinator;
@@ -112,6 +113,7 @@ private slots:
     void onOpenAiSettings();    // M8: 打开设置并定位 AI 服务商配置页（命令面板直达）
     void onSshConfigClicked();  // 打开SSH配置面板（标签页内嵌）
     void onOpenAiChat();        // M8: 打开 AI 助手对话面板（标签页内嵌）
+    void onOpenMarket();        // M9: 打开扩展市场面板（标签页内嵌）
     // M8 stage2: AI 动作（选区/文件上下文注入）
     bool openAiAction(const QString& prompt);   ///< 采集上下文→打开 AI 面板→发送；无可用上下文返回 false
     QString buildAiContext() const;             ///< 当前编辑器选区（或全文）+ 文件信息，空表示无编辑器
@@ -297,6 +299,7 @@ private:
     SshTerminalWidget* m_sshTerminal = nullptr;  // SSH远程终端
     SshConfigPanel*  m_sshConfigPanel = nullptr;   // SSH配置面板（标签页内嵌）
     AIChatPanel*     m_aiChatPanel = nullptr;      // M8: AI 助手对话面板（标签页内嵌）
+    MarketplacePanel* m_marketPanel = nullptr;     // M9: 扩展市场面板（标签页内嵌）
     QWidget*         m_terminalPanel; // 终端面板容器（含面板标题栏）
     QSplitter*      m_vSplitter;      // 垂直分割器（编辑区/终端）
     bool            m_terminalVisible = false;

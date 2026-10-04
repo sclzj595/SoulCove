@@ -28,6 +28,7 @@
 #include "ui/snippet/SnippetManagerDialog.h"
 #include "ui/remote/SshConfigPanel.h"
 #include "ui/ai/AIChatPanel.h"                   // M8: AI 助手对话面板
+#include "ui/market/MarketplacePanel.h"          // M9: 扩展市场面板
 #include "core/ai/AIProviderStore.h"             // M8: 服务商配置变更联动
 #include "core/remote/SshSessionManager.h"      // P3-M01 子项4: 已保存会话列表
 #include "core/remote/SshClient.h"              // P3-M01 子项4: 建立连接挂载工作区
@@ -199,6 +200,7 @@ Widget::Widget(const ProductConfig& config, QWidget *parent)
         if (title == tr("设置")) m_settingsPage = nullptr;
         if (title == tr("SSH 配置")) m_sshConfigPanel = nullptr;
         if (title == tr("AI 助手")) m_aiChatPanel = nullptr;  // M8
+        if (title == tr("扩展市场")) m_marketPanel = nullptr;  // M9
         // 设置页关闭后，如果没有其他标签，恢复显示欢迎页
         if (m_welcomePage && m_tabBar && m_tabBar->tabCount() == 0) {
             m_welcomePage->show();
@@ -1193,6 +1195,13 @@ void Widget::registerShortcutCommands()
         QKeySequence(),  // 不设默认快捷键，避免冲突；Ctrl+Shift+P 命令面板可达
         QStringLiteral("global"),
         [this]{ onOpenAiSettings(); }));
+
+    // ===== M9: 扩展市场 =====
+    filter.registerCommand(make_command(
+        QStringLiteral("market.open"), tr("扩展市场：打开"), tr("扩展"),
+        QKeySequence(),  // 命令面板 Ctrl+Shift+P 可达
+        QStringLiteral("global"),
+        [this]{ onOpenMarket(); }));
 
     // ===== LSP 代码导航 (L15/L17) — 多语言通用，LspManager 按后缀路由 =====
     filter.registerCommand(make_command(
@@ -2990,6 +2999,24 @@ bool Widget::openAiAction(const QString& prompt)
     if (!m_aiChatPanel) return false;
     m_aiChatPanel->sendAction(prompt, ctx);
     return true;
+}
+
+// ===== M9: 扩展市场 =====
+
+void Widget::onOpenMarket()
+{
+    // 扩展市场面板（复用已有标签）
+    if (!m_marketPanel) {
+        m_marketPanel = new MarketplacePanel();
+    }
+
+    const int idx = m_tabBar->findCustomTabIndex(tr("扩展市场"));
+    if (idx >= 0) {
+        m_tabBar->switchToTab(idx);
+    }
+
+    if (m_welcomePage) m_welcomePage->hide();
+    m_tabBar->addCustomTab(m_marketPanel, tr("扩展市场"), true);
 }
 
 void Widget::onOpenFolderRequested()

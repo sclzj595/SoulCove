@@ -245,6 +245,9 @@ set(SOURCES
     # ===== ui/ai/ AI 助手 UI 层（M8）=====
     src/ui/ai/AIChatPanel.cpp                 # AI 对话面板（标签页内嵌，SSE 流式渲染）
 
+    # ===== ui/market/ 扩展市场 UI 层（M9）=====
+    src/ui/market/MarketplacePanel.cpp        # 扩展市场面板（浏览/搜索/安装/卸载）
+
     # ===== ui/settings/ 设置层 =====
     src/ui/settings/SettingsPage.cpp          # 设置页面（标签页内嵌）
 
@@ -339,6 +342,9 @@ set(SOURCES
     src/core/plugin/PluginManager.cpp         # 插件管理器（单例，扫描/加载/初始化/收口）
     src/core/plugin/PluginLoader.cpp          # 插件加载器（QPluginLoader RAII 包装）
     src/core/plugin/PluginAPI.cpp             # 插件 API 实现（日志/命令注册/数据目录）
+
+    # ===== core/market/ 扩展市场核心层（M9）=====
+    src/core/market/MarketplaceRegistry.cpp   # 市场注册表（JSON 拉取/解析）
 
     # ===== interfaces/ 接口层（MOC触发文件）=====
     src/interfaces/remote/ISshClient.cpp      # ISshClient MOC触发（纯接口类信号需要MOC）
