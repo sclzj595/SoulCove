@@ -7,6 +7,34 @@
 #include <sstream>
 #include <QRegularExpression>
 
+// M9 收口: 反斜杠转义还原 —— maddy 不支持 CommonMark 的 backslash escape，
+// 其他渲染器（Typora/VSCode）写的 `\、` `\.` `\*` 等会原样漏到预览里（用户反馈）。
+// 只处理正文文本段（跳过 <pre>/<code> 内部，避免破坏代码内容）。
+static QString unescapeEscapedPunctuation(const QString& html)
+{
+    static const QRegularExpression escRe(
+        QStringLiteral("\\\\([!-/:-@\\[-`{-~、。，！？：；（）【】《》「」『』“”‘’—…])"));
+
+    QString result;
+    qsizetype last = 0;
+    // 按 <pre>/<code> 区段切分，区段内原样保留
+    static const QRegularExpression codeRe(
+        QStringLiteral("(<pre[\\s\\S]*?</pre>|<code[\\s\\S]*?</code>)"),
+        QRegularExpression::CaseInsensitiveOption);
+    QRegularExpressionMatchIterator it = codeRe.globalMatch(html);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch m = it.next();
+        QString text = html.mid(last, m.capturedStart() - last);
+        text.remove(escRe);   // 段内去转义（可能多次出现）
+        result += text + m.captured(0);
+        last = m.capturedEnd();
+    }
+    QString tail = html.mid(last);
+    tail.remove(escRe);
+    result += tail;
+    return result;
+}
+
 QString MaddyParser::toHtml(const QString& markdown)
 {
     // maddy 使用 std::stringstream 接口
@@ -17,6 +45,9 @@ QString MaddyParser::toHtml(const QString& markdown)
     maddy::Parser parser;
     std::string rawHtml = parser.Parse(inStream);
     QString html = QString::fromStdString(rawHtml);
+
+    // M9 收口: 反斜杠转义还原（正文段，跳过代码）
+    html = unescapeEscapedPunctuation(html);
 
     // 代码块语法高亮 (对 <code class="language-xxx"> 着色为 <span class="hl-*">)
     html = CodeHighlighter::highlightHtml(html);
