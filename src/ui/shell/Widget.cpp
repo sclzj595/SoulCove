@@ -1187,6 +1187,13 @@ void Widget::registerShortcutCommands()
         QStringLiteral("global"),
         [this]{ onToggleCommandPalette(); }));
 
+    // ===== M8: AI 配置直达（命令面板可见）=====
+    filter.registerCommand(make_command(
+        QStringLiteral("settings.ai"), tr("设置：打开 AI 服务商配置"), tr("AI"),
+        QKeySequence(),  // 不设默认快捷键，避免冲突；Ctrl+Shift+P 命令面板可达
+        QStringLiteral("global"),
+        [this]{ onOpenAiSettings(); }));
+
     // ===== LSP 代码导航 (L15/L17) — 多语言通用，LspManager 按后缀路由 =====
     filter.registerCommand(make_command(
         QStringLiteral("lsp.gotoDefinition"), tr("跳转到定义"), tr("LSP"),
@@ -2868,6 +2875,15 @@ void Widget::onSettingsClicked()
 
     // 在标签栏中打开（复用现有标签）
     m_tabBar->addCustomTab(m_settingsPage, tr("设置"), true);
+}
+
+// M8: 打开设置页并直接定位到 AI 服务商配置（命令面板 settings.ai 直达）
+void Widget::onOpenAiSettings()
+{
+    onSettingsClicked();
+    if (m_settingsPage) {
+        m_settingsPage->showCategory(SettingsPage::AI);
+    }
 }
 
 // ========== 槽函数：SSH配置面板 ==========

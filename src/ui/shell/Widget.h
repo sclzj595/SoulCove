@@ -109,6 +109,7 @@ private slots:
     void saveCurrentFileDirect();    // Ctrl+S 静默保存（不弹窗）
     void onCurrentIndexChanged(int index);
     void onSettingsClicked();
+    void onOpenAiSettings();    // M8: 打开设置并定位 AI 服务商配置页（命令面板直达）
     void onSshConfigClicked();  // 打开SSH配置面板（标签页内嵌）
     void onOpenAiChat();        // M8: 打开 AI 助手对话面板（标签页内嵌）
     // M8 stage2: AI 动作（选区/文件上下文注入）

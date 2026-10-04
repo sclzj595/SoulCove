@@ -110,6 +110,8 @@ void SettingsPage::setupUI()
     m_categoryList->addItem(tr("AI 助手"));    // M8: AI 服务商配置
     m_categoryList->setCurrentRow(0);
 
+    // M8 收口: showCategory 使用的枚举→行映射锚点（列表项顺序与 SettingsCategory 一致）
+
     navLayout->addWidget(m_categoryList);
 
     // 恢复默认按钮
@@ -2507,6 +2509,15 @@ void SettingsPage::onCategoryChanged(int row)
 {
     if (row >= 0 && row < m_pageStack->count()) {
         m_pageStack->setCurrentIndex(row);
+    }
+}
+
+// M8 收口: 按分类直达设置页（setCurrentRow 触发 onCategoryChanged 切换右侧栈）
+void SettingsPage::showCategory(SettingsCategory category)
+{
+    const int row = static_cast<int>(category);
+    if (row >= 0 && row < m_categoryList->count()) {
+        m_categoryList->setCurrentRow(row);
     }
 }
 

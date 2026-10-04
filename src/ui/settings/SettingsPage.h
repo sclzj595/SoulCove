@@ -40,6 +40,9 @@ public:
     };
     Q_ENUM(SettingsCategory)
 
+    /// M8: 按分类切换设置页（Widget 层「打开 AI 服务商配置」命令直达入口）
+    void showCategory(SettingsCategory category);
+
     explicit SettingsPage(QWidget* parent = nullptr);
 
 signals:
