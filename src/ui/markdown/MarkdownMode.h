@@ -124,6 +124,8 @@ private:
     // === P3-M02 子项2+3 → M9 收口: 预览 CSS ===
     /// @brief 构建预览区 CSS：从当前主题 palette 动态生成 + 用户自定义 CSS 叠加
     QString buildPreviewCss() const;
+    /// @brief M9 收口: 表格视觉增强（全宽/网格边框/内边距/斑马行，HTML 属性后处理）
+    static QString enhanceTables(const QString& html);
     /// @brief 应用 CSS 到预览区 QTextDocument
     void applyPreviewCss();
 };

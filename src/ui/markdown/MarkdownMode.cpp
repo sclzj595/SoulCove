@@ -247,6 +247,9 @@ void MarkdownMode::refreshPreview()
     if (!m_parser) return;
     QString html = m_parser->toHtml(m_editor->toPlainText());
 
+    // M9 收口: 表格视觉增强（全宽/内边距/网格边框/斑马行）
+    html = enhanceTables(html);
+
     // 保存刷新前的滚动进度比例，刷新后恢复 (避免 setHtml 重置到顶部导致闪烁/滚动丢失)
     QScrollBar* vScroll = m_preview->verticalScrollBar();
     double ratio = 0.0;
@@ -531,6 +534,49 @@ void MarkdownMode::parseToc()
 // P3-M02 子项2+3: CSS 预设与用户自定义 CSS
 // ============================================================
 
+// ============================================================
+// M9 收口: 表格视觉增强（QTextBrowser 的 CSS2.1 子集不支持
+// cellpadding/border-radius/:nth-child，改用 HTML 属性后处理实现）
+// ============================================================
+QString MarkdownMode::enhanceTables(const QString& html)
+{
+    const auto& p = ThemeManager::instance().currentPalette();
+    const QString zebra = p.currentLineBg.name();
+
+    // 1) 表格容器属性：全宽 + 网格边框 + 单元格内边距（HTML 属性，Qt rich text 原生支持）
+    QString out = html;
+    out.replace(QStringLiteral("<table>"),
+                QStringLiteral("<table width=\"100%\" border=\"1\" cellspacing=\"0\" cellpadding=\"6\">"),
+                Qt::CaseInsensitive);
+
+    // 2) 斑马行：数据行（无 <th> 的行）偶数序注入 td bgcolor；表头行由 CSS 着色
+    static const QRegularExpression rowRe(
+        QStringLiteral("<tr[^>]*>(.*?)</tr>"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+
+    QString result;
+    qsizetype last = 0;
+    int dataRow = 0;
+    QRegularExpressionMatchIterator it = rowRe.globalMatch(out);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch m = it.next();
+        result += out.mid(last, m.capturedStart() - last);
+        QString row = m.captured(0);
+        if (!row.contains(QStringLiteral("<th"), Qt::CaseInsensitive)) {
+            if (dataRow % 2 == 1) {
+                row.replace(QStringLiteral("<td"),
+                            QStringLiteral("<td bgcolor=\"%1\"").arg(zebra),
+                            Qt::CaseInsensitive);
+            }
+            ++dataRow;
+        }
+        result += row;
+        last = m.capturedEnd();
+    }
+    result += out.mid(last);
+    return result;
+}
+
 QString MarkdownMode::buildPreviewCss() const
 {
     // M9 收口: 预览 CSS 从当前主题 palette 动态生成。
@@ -545,11 +591,11 @@ QString MarkdownMode::buildPreviewCss() const
 
     QString css = QStringLiteral(
         "body { font-family: 'Microsoft YaHei','Segoe UI',sans-serif; font-size: 14px; "
-        "line-height: 1.7; color: %1; background-color: %2; margin: 0; padding: 8px 16px; }"
+        "line-height: 1.6; color: %1; background-color: %2; margin: 0; padding: 20px 24px; }"
         "h1,h2,h3,h4,h5,h6 { color: %1; font-weight: 600; line-height: 1.3; "
         "margin-top: 20px; margin-bottom: 8px; }"
         "h1 { font-size: 24px; border-bottom: 2px solid %3; padding-bottom: 6px; color: %3; }"
-        "h2 { font-size: 20px; border-bottom: 1px solid %4; padding-bottom: 4px; color: %3; }"
+        "h2 { font-size: 20px; border-bottom: 1px solid %4; padding-bottom: 4px; margin-bottom: 14px; color: %3; }"
         "h3 { font-size: 17px; color: %3; }"
         "h4 { font-size: 15px; color: %5; }"
         "h5,h6 { font-size: 14px; color: %5; }"
@@ -563,7 +609,7 @@ QString MarkdownMode::buildPreviewCss() const
         "pre { background-color: %8; color: %1; padding: 12px; "
         "border: 1px solid %4; border-radius: 6px; margin: 10px 0; }"
         "pre code { background-color: transparent; color: %1; padding: 0; border: none; "
-        "display: block; white-space: pre; font-size: 13px; line-height: 1.5; }"
+        "display: block; white-space: pre-wrap; font-size: 13px; line-height: 1.35; }"
         "blockquote { border-left: 4px solid %3; padding: 6px 14px; margin: 10px 0; "
         "color: %5; background-color: %9; }"
         "table { border-collapse: collapse; margin: 10px 0; }"
@@ -610,6 +656,18 @@ void MarkdownMode::applyPreviewCss()
     if (!m_preview || !m_preview->document()) return;
     // P3-M02 子项2+3: 通过 setDefaultStyleSheet 应用 CSS（主题预设 + 用户自定义）
     m_preview->document()->setDefaultStyleSheet(buildPreviewCss());
+
+    // M9 收口: 预览滚动条主题化（替换原生滚动条，匹配深浅主题）
+    const auto& pal = ThemeManager::instance().currentPalette();
+    m_preview->setStyleSheet(QStringLiteral(
+        "QTextBrowser#mdPreview { background-color: %1; border: none; }"
+        "QScrollBar:vertical { background: %2; width: 10px; margin: 0; }"
+        "QScrollBar::handle:vertical { background: %3; border-radius: 5px; min-height: 30px; }"
+        "QScrollBar::handle:vertical:hover { background: %4; }"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
+        "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }")
+        .arg(pal.bgEditor.name(), pal.scrollbarBg.name(),
+             pal.scrollbarHandle.name(), pal.scrollbarHandleHover.name()));
 }
 
 // ============================================================
