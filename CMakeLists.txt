@@ -516,6 +516,10 @@ add_custom_target(plugin_sdk_sync
 )
 add_dependencies(scCore plugin_sdk_sync)
 
+# ====== M9/M3: Markdown 渲染管线边界用例测试（控制台）======
+add_executable(md_test tests/MarkdownEdgeCaseTest.cpp)
+target_link_libraries(md_test PRIVATE scCore)
+
 # Windows平台:复制运行时依赖的Qt动态库到输出目录
 # 注：三个可执行文件共享同一输出目录，DLL 只需拷贝一次（绑定到 scIDE 目标）
 if(WIN32)

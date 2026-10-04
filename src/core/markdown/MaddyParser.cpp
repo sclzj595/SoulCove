@@ -7,38 +7,104 @@
 #include <sstream>
 #include <QRegularExpression>
 
-// M9 收口: 反斜杠转义还原 —— maddy 不支持 CommonMark 的 backslash escape，
-// 其他渲染器（Typora/VSCode）写的 `\、` `\.` `\*` 等会原样漏到预览里（用户反馈）。
-// 只处理正文文本段（跳过 <pre>/<code> 内部，避免破坏代码内容）。
-static QString unescapeEscapedPunctuation(const QString& html)
+// ============================================================
+// M9 收口: 反斜杠转义支持 —— maddy 不支持 CommonMark backslash escape，
+// 且 `\*` 会触发其斜体解析器产出损坏标签（md_test 实测）。
+// 方案：解析前把 `\X` 替换为哨兵占位（maddy 不再看到 X 本体），
+//       解析后把占位还原为 HTML 数字实体（QTextDocument 渲染为字面 X）。
+// 跳过范围：围栏代码块、行内代码（转义在代码中无意义且须原样保留）。
+// ============================================================
+static const QChar kEscSentinelStart = QChar(0x01);
+static const QChar kEscSentinelEnd   = QChar(0x02);
+
+static QString preprocessEscapes(const QString& markdown)
 {
     static const QRegularExpression escRe(
         QStringLiteral("\\\\([!-/:-@\\[-`{-~、。，！？：；（）【】《》「」『』“”‘’—…])"));
 
-    QString result;
-    qsizetype last = 0;
-    // 按 <pre>/<code> 区段切分，区段内原样保留
-    static const QRegularExpression codeRe(
-        QStringLiteral("(<pre[\\s\\S]*?</pre>|<code[\\s\\S]*?</code>)"),
-        QRegularExpression::CaseInsensitiveOption);
-    QRegularExpressionMatchIterator it = codeRe.globalMatch(html);
-    while (it.hasNext()) {
-        const QRegularExpressionMatch m = it.next();
-        QString text = html.mid(last, m.capturedStart() - last);
-        text.remove(escRe);   // 段内去转义（可能多次出现）
-        result += text + m.captured(0);
-        last = m.capturedEnd();
+    QStringList outLines;
+    bool inFence = false;
+    const QStringList lines = markdown.split(QLatin1Char('\n'));
+    for (const QString& line : lines) {
+        if (line.trimmed().startsWith(QLatin1String("```"))) {
+            inFence = !inFence;
+            outLines << line;
+            continue;
+        }
+        if (inFence) { outLines << line; continue; }
+
+        // 行内按 `code` 段切分：段外应用转义还原；段内转义不生效（CommonMark），
+        // 原样保留（maddy 对行内代码内容不做 markdown 解析，`\*` 直接可见）
+        QString out;
+        qsizetype last = 0;
+        static const QRegularExpression inlineCodeRe(QStringLiteral("`[^`]*`"));
+        QRegularExpressionMatchIterator it = inlineCodeRe.globalMatch(line);
+        while (it.hasNext()) {
+            const QRegularExpressionMatch m = it.next();
+            QString seg = line.mid(last, m.capturedStart() - last);
+            seg.remove(escRe);   // `\X` → X
+            out += seg + m.captured(0);
+            last = m.capturedEnd();
+        }
+        QString tail = line.mid(last);
+        QRegularExpressionMatchIterator tailIt = escRe.globalMatch(tail);
+        if (tailIt.hasNext()) {
+            QString rebuilt;
+            qsizetype tlast = 0;
+            while (tailIt.hasNext()) {
+                const QRegularExpressionMatch cm = tailIt.next();
+                rebuilt += tail.mid(tlast, cm.capturedStart() - tlast);
+                rebuilt += kEscSentinelStart + QString::number(cm.captured(1).at(0).unicode()) + kEscSentinelEnd;
+                tlast = cm.capturedEnd();
+            }
+            rebuilt += tail.mid(tlast);
+            tail = rebuilt;
+        }
+        out += tail;
+        outLines << out;
     }
-    QString tail = html.mid(last);
-    tail.remove(escRe);
-    result += tail;
-    return result;
+    return outLines.join(QLatin1Char('\n'));
+}
+
+static QString resolveEscapeEntities(const QString& html)
+{
+    static const QRegularExpression sentRe(
+        QStringLiteral("\x01(\\d+)\x02"));
+    QString out = html;
+    out.replace(sentRe, QStringLiteral("&#\\1;"));
+    return out;
+}
+
+// M9 收口: 引用内列表降级 —— maddy 的 QuoteParser 不支持块内列表，
+// "> - 项" 形式会导致整个引用块输出为空（md_test 实测，内容丢失最严重）。
+// 缓解：把引用块内的列表标记降级为文字圆点 "•"，保住内容（牺牲列表语义）。
+static QString softenListsInsideQuotes(const QString& markdown)
+{
+    static const QRegularExpression quoteListRe(
+        QStringLiteral("^(\\s*>\\s*)([-*]|\\d+[.)])\\s+"));
+    QStringList outLines;
+    for (const QString& line : markdown.split(QLatin1Char('\n'))) {
+        const QRegularExpressionMatch m = quoteListRe.match(line);
+        if (m.hasMatch()) {
+            outLines << line.left(m.capturedStart(2)) + QStringLiteral("• ") + line.mid(m.capturedEnd(2));
+        } else {
+            outLines << line;
+        }
+    }
+    return outLines.join(QLatin1Char('\n'));
 }
 
 QString MaddyParser::toHtml(const QString& markdown)
 {
+    // M9 收口: 先做反斜杠转义预处理（maddy 无法自行处理，见上）
+    QString processed = softenListsInsideQuotes(preprocessEscapes(markdown));
+    // M9 收口: 末尾补空行 —— 引用块/列表位于文档末行且无尾空行时 maddy 整块输出为空（实测）
+    if (!processed.endsWith(QStringLiteral("\n\n"))) {
+        processed += QStringLiteral("\n\n");
+    }
+
     // maddy 使用 std::stringstream 接口
-    std::string input = markdown.toStdString();
+    std::string input = processed.toStdString();
     std::stringstream inStream(input);
 
     // maddy Parse: takes istream, returns string
@@ -46,8 +112,8 @@ QString MaddyParser::toHtml(const QString& markdown)
     std::string rawHtml = parser.Parse(inStream);
     QString html = QString::fromStdString(rawHtml);
 
-    // M9 收口: 反斜杠转义还原（正文段，跳过代码）
-    html = unescapeEscapedPunctuation(html);
+    // M9 收口: 占位还原为 HTML 数字实体
+    html = resolveEscapeEntities(html);
 
     // 代码块语法高亮 (对 <code class="language-xxx"> 着色为 <span class="hl-*">)
     html = CodeHighlighter::highlightHtml(html);
