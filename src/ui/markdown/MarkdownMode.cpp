@@ -594,7 +594,7 @@ QString MarkdownMode::buildPreviewCss() const
     QString css = QStringLiteral(
         "body { font-family: '%16','Segoe UI','Microsoft YaHei',sans-serif; font-size: 14px; "
         "line-height: 1.6; color: %1; background-color: %2; margin: 0; padding: 20px 24px; }"
-        "h1,h2,h3,h4,h5,h6 { color: %1; font-weight: 600; line-height: 1.3; "
+        "h1,h2,h3,h4,h5,h6 { color: %1; font-weight: bold; line-height: 1.3; "
         "margin-top: 24px; margin-bottom: 10px; }"
         // Qt 富文本不支持 border 简写，必须用长手属性（否则下划线/左竖条不渲染）
         "h1 { font-size: 22px; padding-bottom: 6px; "
@@ -606,7 +606,7 @@ QString MarkdownMode::buildPreviewCss() const
         "h5,h6 { font-size: 14px; color: %5; }"
         "p { margin: 0 0 12px 0; }"
         "a { color: %3; text-decoration: none; }"
-        "strong { font-weight: 700; color: %1; }"
+        "strong { font-weight: bold; color: %1; }"
         "em { font-style: italic; color: %3; }"
         "del { color: %5; text-decoration: line-through; }"
         "code { background-color: %6; color: %7; padding: 2px 5px; border-radius: 3px; "
@@ -620,7 +620,7 @@ QString MarkdownMode::buildPreviewCss() const
         "color: %5; background-color: %9; }"
         "table { border-collapse: collapse; margin: 10px 0; }"
         "th,td { border: 1px solid %4; padding: 6px 12px; }"
-        "th { background-color: %6; color: %3; font-weight: 600; }"
+        "th { background-color: %6; color: %3; font-weight: bold; }"
         "ul,ol { padding-left: 28px; margin: 6px 0; }"
         "li { margin: 4px 0; }"
         "img { max-width: 100%; }"
