@@ -28,7 +28,7 @@ static void run(const char* name, const QString& md,
         ++g_fail;
         qWarning() << "[FAIL]" << name;
         qWarning() << "  input :" << md.left(120);
-        qWarning() << "  output:" << html.left(400);
+        qWarning() << "  output:" << html;   // M3: 失败时输出完整 HTML，便于断言核对
     }
 }
 
@@ -112,6 +112,24 @@ int main(int argc, char* argv[])
     run("strong/cjk-full-line",
         QStringLiteral("**现状**：部分实现，请求 ID 与路由机制已有基础，但 completion/definition/references 仍依赖 LspManager::m_currentRequestFile，存在并发覆盖风险。\n"),
         [](const QString& h) { return contains(h, "<strong>现状</strong>"); });
+
+    // 14. 探针：用户文档 V1.7 实际字节 —— 粗体后同行跟行内代码
+    run("strong/followed-by-inline-code",
+        QStringLiteral("**新建文件**: `src/ui/ModernDialog.h/cpp`\n"),
+        [](const QString& h) { return contains(h, "<strong>新建文件</strong>"); });
+
+    // 14b. 探针：粗体 + ASCII 冒号空格
+    run("strong/ascii-colon-space", QStringLiteral("**新建文件**: src/ui/x.cpp\n"),
+        [](const QString& h) { return contains(h, "<strong>新建文件</strong>"); });
+
+    // 14c. 探针：字面 HTML 标签作为文字例子（maddy 原样透传 → QTextDocument 当真标签，结构被带崩）
+    //     验证：用户写的 <span>/<h1> 被实体化为 &#60;span 等（高亮器自身的 <span class=...> 合法存在）
+    run("html/literal-tags-as-text",
+        QStringLiteral("- `<span style=\"font-size:14pt;\">` 包裹\n- `<h1>`~`<h6>` 内联 style\n"),
+        [](const QString& h) {
+            return contains(h, "&#60;span style=") && contains(h, "&#60;h1")
+                && notContains(h, "<span style=") && notContains(h, "<h1>");
+        });
 
     // 13. 探针：粗体后跟空格（对照组）
     run("strong/space-after", QStringLiteral("**bold** text\n"),

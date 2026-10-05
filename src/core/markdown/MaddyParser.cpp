@@ -5,6 +5,7 @@
 
 #include <maddy/parser.h>
 #include <sstream>
+#include <functional>
 #include <QRegularExpression>
 
 // ============================================================
@@ -16,11 +17,70 @@
 // ============================================================
 static const QChar kEscSentinelStart = QChar(0x01);
 static const QChar kEscSentinelEnd   = QChar(0x02);
+static const QChar kStrongOpen       = QChar(0x03);
+static const QChar kStrongClose      = QChar(0x04);
 
-static QString preprocessEscapes(const QString& markdown)
+// 码点 → 纯大写字母串（A=0..Z=25, base26）。
+// 用字母而非数字编码：语法高亮器只着色数字/关键字等，字母串不会被拆坏，
+// 哨兵得以原样存活到解析后统一还原。
+static QString toLetterCode(int v)
+{
+    QString s;
+    do { s.prepend(QChar('A' + (v % 26))); v /= 26; } while (v > 0);
+    return s;
+}
+static int fromLetterCode(const QString& s)
+{
+    int v = 0;
+    for (const QChar& c : s) v = v * 26 + (c.toUpper().unicode() - 'A');
+    return v;
+}
+static QString sentinelFor(QChar ch)
+{
+    return kEscSentinelStart + toLetterCode(ch.unicode()) + kEscSentinelEnd;
+}
+
+// 正则匹配 → 回调替换的通用工具（Qt 6.5 无 lambda 版 replace 重载）
+static QString replaceRegexWith(const QString& input, const QRegularExpression& re,
+                                const std::function<QString(const QRegularExpressionMatch&)>& fn)
+{
+    QString out;
+    qsizetype last = 0;
+    QRegularExpressionMatchIterator it = re.globalMatch(input);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch m = it.next();
+        out += input.mid(last, m.capturedStart() - last);
+        out += fn(m);
+        last = m.capturedEnd();
+    }
+    out += input.mid(last);
+    return out;
+}
+
+static QString escapeLtAndSentinelize(const QString& seg)
+{
+    QString out;
+    for (const QChar& c : seg) {
+        if (c == QLatin1Char('<')) out += sentinelFor(c);
+        else out += c;
+    }
+    return out;
+}
+
+// M9 收口: 行内预处理（逐行，跳过围栏代码块）：
+//   文本段： ① `\X` 转义还原（maddy 不支持 CommonMark 转义，且 `\*` 会产出损坏标签）
+//            ② `<` 哨兵化（原始 HTML 标签一律按文字显示——maddy 原样透传会让
+//               QTextDocument 当真标签解析，未闭合标签把后续结构全部带崩）
+//            ③ `**X**` 粗体自解析为隐藏 <strong>（maddy 的 strong 解析器在
+//               同行后随行内代码时失效，md_test 实测）
+//   行内代码段：仅 `<` 哨兵化（maddy 对 code 内容不转义 <，同样污染结构）；
+//            `\X` 与其余内容原样保留
+static QString preprocessInlineMarkdown(const QString& markdown)
 {
     static const QRegularExpression escRe(
         QStringLiteral("\\\\([!-/:-@\\[-`{-~、。，！？：；（）【】《》「」『』“”‘’—…])"));
+    static const QRegularExpression strongRe(
+        QStringLiteral("\\*\\*([^*\\n]+)\\*\\*"));
 
     QStringList outLines;
     bool inFence = false;
@@ -33,45 +93,60 @@ static QString preprocessEscapes(const QString& markdown)
         }
         if (inFence) { outLines << line; continue; }
 
-        // 行内按 `code` 段切分：段外应用转义还原；段内转义不生效（CommonMark），
-        // 原样保留（maddy 对行内代码内容不做 markdown 解析，`\*` 直接可见）
         QString out;
         qsizetype last = 0;
         static const QRegularExpression inlineCodeRe(QStringLiteral("`[^`]*`"));
         QRegularExpressionMatchIterator it = inlineCodeRe.globalMatch(line);
         while (it.hasNext()) {
             const QRegularExpressionMatch m = it.next();
+            // —— 文本段 ——
             QString seg = line.mid(last, m.capturedStart() - last);
-            seg.remove(escRe);   // `\X` → X
-            out += seg + m.captured(0);
+            seg = replaceRegexWith(seg, escRe, [](const QRegularExpressionMatch& cm) {
+                return sentinelFor(cm.captured(1).at(0));          // ① `\X` → 哨兵(字面 X)
+            });
+            seg = escapeLtAndSentinelize(seg);                     // ② `<` 哨兵化
+            seg = replaceRegexWith(seg, strongRe, [](const QRegularExpressionMatch& sm) {
+                return kStrongOpen + QStringLiteral("<strong>") + sm.captured(1)
+                     + QStringLiteral("</strong>") + kStrongClose; // ③ 粗体自解析
+            });
+            out += seg;
+            // —— 行内代码段 ——（`\X` 原样；`<` 哨兵化防止污染结构）
+            out += escapeLtAndSentinelize(m.captured(0));
             last = m.capturedEnd();
         }
+        // —— 行尾文本段 ——
         QString tail = line.mid(last);
-        QRegularExpressionMatchIterator tailIt = escRe.globalMatch(tail);
-        if (tailIt.hasNext()) {
-            QString rebuilt;
-            qsizetype tlast = 0;
-            while (tailIt.hasNext()) {
-                const QRegularExpressionMatch cm = tailIt.next();
-                rebuilt += tail.mid(tlast, cm.capturedStart() - tlast);
-                rebuilt += kEscSentinelStart + QString::number(cm.captured(1).at(0).unicode()) + kEscSentinelEnd;
-                tlast = cm.capturedEnd();
-            }
-            rebuilt += tail.mid(tlast);
-            tail = rebuilt;
-        }
+        tail = replaceRegexWith(tail, escRe, [](const QRegularExpressionMatch& cm) {
+            return sentinelFor(cm.captured(1).at(0));
+        });
+        tail = escapeLtAndSentinelize(tail);
+        tail = replaceRegexWith(tail, strongRe, [](const QRegularExpressionMatch& sm) {
+            return kStrongOpen + QStringLiteral("<strong>") + sm.captured(1)
+                 + QStringLiteral("</strong>") + kStrongClose;
+        });
         out += tail;
         outLines << out;
     }
     return outLines.join(QLatin1Char('\n'));
 }
 
-static QString resolveEscapeEntities(const QString& html)
+// 管线最末步：还原全部哨兵（必须在语法高亮/Mermaid 之后，避免被拆坏）
+static QString resolveSentinels(const QString& html)
 {
     static const QRegularExpression sentRe(
-        QStringLiteral("\x01(\\d+)\x02"));
-    QString out = html;
-    out.replace(sentRe, QStringLiteral("&#\\1;"));
+        QStringLiteral("\x01([A-Z]+)\x02"));
+    QString out;
+    qsizetype last = 0;
+    QRegularExpressionMatchIterator it = sentRe.globalMatch(html);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch m = it.next();
+        out += html.mid(last, m.capturedStart() - last);
+        out += QStringLiteral("&#%1;").arg(fromLetterCode(m.captured(1)));
+        last = m.capturedEnd();
+    }
+    out += html.mid(last);
+    out.replace(kStrongOpen + QStringLiteral("S") + kStrongClose, QStringLiteral("<strong>"));
+    out.replace(kStrongOpen + QStringLiteral("ES") + kStrongClose, QStringLiteral("</strong>"));
     return out;
 }
 
@@ -109,8 +184,8 @@ static QString softenListsInsideQuotes(const QString& markdown)
 
 QString MaddyParser::toHtml(const QString& markdown)
 {
-    // M9 收口: 先做反斜杠转义预处理（maddy 无法自行处理，见上）
-    QString processed = softenListsInsideQuotes(preprocessEscapes(markdown));
+    // M9 收口: 行内预处理（转义/HTML 哨兵化/粗体自解析，见上）
+    QString processed = softenListsInsideQuotes(preprocessInlineMarkdown(markdown));
     // M9 收口: 末尾补空行 —— 引用块/列表位于文档末行且无尾空行时 maddy 整块输出为空（实测）
     if (!processed.endsWith(QStringLiteral("\n\n"))) {
         processed += QStringLiteral("\n\n");
@@ -125,17 +200,16 @@ QString MaddyParser::toHtml(const QString& markdown)
     std::string rawHtml = parser.Parse(inStream);
     QString html = QString::fromStdString(rawHtml);
 
-    // M9 收口: 占位还原为 HTML 数字实体
-    html = resolveEscapeEntities(html);
-
-    // M9 收口: hr 细线化
-    html = replaceHrWithThinRule(html);
-
     // 代码块语法高亮 (对 <code class="language-xxx"> 着色为 <span class="hl-*">)
     html = CodeHighlighter::highlightHtml(html);
 
     // P3-M02 子项5: mermaid 代码块渲染（将 <pre><code class="language-mermaid">...</code></pre>
     // 替换为内联 SVG；渲染失败则保留原始代码并显示错误提示）
+    html = renderMermaidBlocks(html);
+
+    // M9 收口: 哨兵还原（最后一步——语法高亮/Mermaid 不会拆坏哨兵），含 hr 细线化
+    html = resolveSentinels(html);
+    html = replaceHrWithThinRule(html);
     html = renderMermaidBlocks(html);
 
     // P3-M02 子项3: 返回 body-only HTML（不再嵌入 <style>）
