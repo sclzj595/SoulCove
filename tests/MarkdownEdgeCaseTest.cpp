@@ -98,6 +98,25 @@ int main(int argc, char* argv[])
         QStringLiteral("用法：`a \\* b` 保持原样\n"),
         [](const QString& h) { return contains(h, "\\* b"); });
 
+    // 11. 探针：粗体后紧跟中文标点（用户文档实际用法，maddy 疑似失效）
+    run("strong/cjk-colon", QStringLiteral("**现状**：部分实现\n"),
+        [](const QString& h) { return contains(h, "<strong>现状</strong>"); });
+
+    // 12. hr 细线化：不应有 <hr> 原始输出，替换为着色细段落
+    run("hr/thin-line", QStringLiteral("上\n\n---\n\n下\n"),
+        [](const QString& h) {
+            return notContains(h, "<hr") && contains(h, "background-color") && contains(h, "下");
+        });
+
+    // 12b. 探针：用户需求文档原句（定位 **现状** 字面星号问题的边界）
+    run("strong/cjk-full-line",
+        QStringLiteral("**现状**：部分实现，请求 ID 与路由机制已有基础，但 completion/definition/references 仍依赖 LspManager::m_currentRequestFile，存在并发覆盖风险。\n"),
+        [](const QString& h) { return contains(h, "<strong>现状</strong>"); });
+
+    // 13. 探针：粗体后跟空格（对照组）
+    run("strong/space-after", QStringLiteral("**bold** text\n"),
+        [](const QString& h) { return contains(h, "<strong>bold</strong>"); });
+
     qInfo() << "================================";
     qInfo() << "PASS" << g_pass << " FAIL" << g_fail;
     return g_fail == 0 ? 0 : 1;

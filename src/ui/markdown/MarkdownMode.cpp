@@ -621,7 +621,6 @@ QString MarkdownMode::buildPreviewCss() const
         "table { border-collapse: collapse; margin: 10px 0; }"
         "th,td { border: 1px solid %4; padding: 6px 12px; }"
         "th { background-color: %6; color: %3; font-weight: 600; }"
-        "hr { border: none; border-top: 1px solid %4; margin: 18px 0; }"
         "ul,ol { padding-left: 28px; margin: 6px 0; }"
         "li { margin: 4px 0; }"
         "img { max-width: 100%; }"

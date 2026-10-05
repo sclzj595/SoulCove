@@ -75,6 +75,19 @@ static QString resolveEscapeEntities(const QString& html)
     return out;
 }
 
+// M9 收口: hr 细线化 —— Qt 把 <hr> 渲染成粗色条（用户反馈）。
+// 后处理替换为 2px 高的着色段落（Qt 对块级 background-color/margin 支持可靠），
+// 视觉即 VSCode 式细分割线。
+static QString replaceHrWithThinRule(const QString& html)
+{
+    const QString barColor = ThemeManager::instance().currentPalette().borderDefault.name();
+    QString out = html;
+    out.replace(QRegularExpression(QStringLiteral("<hr\\s*/?>"), QRegularExpression::CaseInsensitiveOption),
+                QStringLiteral("<p style=\"margin-top:14px; margin-bottom:14px; "
+                               "background-color:%1; font-size:2px;\">&nbsp;</p>").arg(barColor));
+    return out;
+}
+
 // M9 收口: 引用内列表降级 —— maddy 的 QuoteParser 不支持块内列表，
 // "> - 项" 形式会导致整个引用块输出为空（md_test 实测，内容丢失最严重）。
 // 缓解：把引用块内的列表标记降级为文字圆点 "•"，保住内容（牺牲列表语义）。
@@ -114,6 +127,9 @@ QString MaddyParser::toHtml(const QString& markdown)
 
     // M9 收口: 占位还原为 HTML 数字实体
     html = resolveEscapeEntities(html);
+
+    // M9 收口: hr 细线化
+    html = replaceHrWithThinRule(html);
 
     // 代码块语法高亮 (对 <code class="language-xxx"> 着色为 <span class="hl-*">)
     html = CodeHighlighter::highlightHtml(html);
