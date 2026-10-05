@@ -584,18 +584,23 @@ QString MarkdownMode::buildPreviewCss() const
     // 暗黑紫/粉紫等多主题下预览配色与主题脱节（用户反馈项）。
     const auto& p = ThemeManager::instance().currentPalette();
     const QString accent = p.accentPrimary.name();
+    // M9 收口: 正文首选用应用当前 UI 字体（与编辑器本体视觉统一），主题差异时自然回退
+    const QString uiFont = QApplication::font().family();
     // 层次底色：均取主题内已配套的"错一档"表面色
     const QString inlineCodeBg = p.bgTabInactive.name();
     const QString preBg = p.bgInput.name();
     const QString quoteBg = p.currentLineBg.name();
 
     QString css = QStringLiteral(
-        "body { font-family: 'Microsoft YaHei','Segoe UI',sans-serif; font-size: 14px; "
+        "body { font-family: '%16','Segoe UI','Microsoft YaHei',sans-serif; font-size: 14px; "
         "line-height: 1.6; color: %1; background-color: %2; margin: 0; padding: 20px 24px; }"
         "h1,h2,h3,h4,h5,h6 { color: %1; font-weight: 600; line-height: 1.3; "
         "margin-top: 20px; margin-bottom: 8px; }"
-        "h1 { font-size: 22px; border-bottom: 2px solid %3; padding-bottom: 6px; }"
-        "h2 { font-size: 18px; border-bottom: 1px solid %4; padding-bottom: 4px; margin-bottom: 14px; }"
+        // Qt 富文本不支持 border 简写，必须用长手属性（否则下划线/左竖条不渲染）
+        "h1 { font-size: 22px; padding-bottom: 6px; "
+        "border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: %3; }"
+        "h2 { font-size: 18px; padding-bottom: 4px; margin-bottom: 14px; "
+        "border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: %4; }"
         "h3 { font-size: 16px; }"
         "h4 { font-size: 15px; color: %5; }"
         "h5,h6 { font-size: 14px; color: %5; }"
@@ -610,7 +615,8 @@ QString MarkdownMode::buildPreviewCss() const
         "border: 1px solid %4; border-radius: 6px; margin: 10px 0; }"
         "pre code { background-color: transparent; color: %1; padding: 0; border: none; "
         "display: block; white-space: pre-wrap; font-size: 13px; line-height: 1.35; }"
-        "blockquote { border-left: 4px solid %3; padding: 6px 14px; margin: 10px 0; "
+        "blockquote { padding: 6px 14px; margin: 10px 0; "
+        "border-left-width: 4px; border-left-style: solid; border-left-color: %3; "
         "color: %5; background-color: %9; }"
         "table { border-collapse: collapse; margin: 10px 0; }"
         "th,td { border: 1px solid %4; padding: 6px 12px; }"
@@ -641,7 +647,8 @@ QString MarkdownMode::buildPreviewCss() const
         .arg(p.syntax.comment.name())     // %12
         .arg(p.syntax.preprocessor.name())// %13
         .arg(p.syntax.type.name())        // %14
-        .arg(p.syntax.function.name());   // %15
+        .arg(p.syntax.function.name())    // %15
+        .arg(uiFont);                     // %16 应用 UI 字体
 
     // P3-M02 子项2: 用户自定义 CSS 叠加（用户 CSS 优先级更高）
     QString userCss = ConfigManager::instance().markdownCustomCss();
