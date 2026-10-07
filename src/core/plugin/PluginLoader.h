@@ -19,6 +19,7 @@ struct PluginRecord
     QString description;              ///< 描述（元数据）
     QString error;                    ///< 加载/校验失败原因（成功时为空）
     IPlugin* instance = nullptr;      ///< 插件实例（loader 存活期间有效）
+    QPluginLoader* loader = nullptr;  ///< 真正执行 load() 的 loader（非拥有；存活期由 PluginManager::m_loaders 接管）
     bool initialized = false;         ///< initialize() 是否成功
 
     bool isValid() const { return instance != nullptr && error.isEmpty(); }

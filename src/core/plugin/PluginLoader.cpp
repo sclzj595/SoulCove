@@ -42,8 +42,9 @@ PluginRecord PluginLoader::load(const QString& filePath)
     if (record.description.isEmpty()) record.description = plugin->description();
 
     record.instance = plugin;
-    // 释放 unique_ptr 所有权由调用方（PluginManager）接管存活期
-    loader.release();
+    // 所有权移交：真正执行 load() 的 loader 指针交由调用方（PluginManager）接管存活期，
+    // 实例指针的有效性依赖它；卸载时必须用它（而非临时实例）执行 unload()
+    record.loader = loader.release();
     LOG_INFO_S("PluginLoader", "load",
                "插件加载成功: " << record.name.toStdString() << " v" << record.version.toStdString()
                                << " (" << filePath.toStdString() << ")");
@@ -54,11 +55,17 @@ bool PluginLoader::unload(PluginRecord& record)
 {
     if (record.filePath.isEmpty()) return false;
 
-    // 用临时 QPluginLoader 关联同一文件执行卸载（Qt 保证同路径 loader 状态共享）
-    QPluginLoader loader(record.filePath);
-    const bool ok = loader.unload();
+    record.instance = nullptr;
+
+    // 优先用真正执行过 load() 的 loader（PluginManager::m_loaders 持有）；
+    // 记录未携带 loader（加载失败的记录）时无库可卸载，直接返回。
+    QPluginLoader* loaderPtr = record.loader;
+    record.loader = nullptr;
+    if (!loaderPtr) return false;
+
+    const bool ok = loaderPtr->unload();
     if (!ok) {
-        record.error = loader.errorString();
+        record.error = loaderPtr->errorString();
         LOG_WARN_S("PluginLoader", "unload",
                    "插件卸载失败: " << record.filePath.toStdString() << " - "
                                    << record.error.toStdString());
@@ -66,7 +73,6 @@ bool PluginLoader::unload(PluginRecord& record)
         LOG_INFO_S("PluginLoader", "unload",
                    "插件已卸载: " << record.filePath.toStdString());
     }
-    record.instance = nullptr;
     return ok;
 }
 

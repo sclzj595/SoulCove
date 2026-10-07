@@ -92,7 +92,9 @@ int PluginManager::loadPlugins(const QString& dir)
         }
 
         PluginRecord record = PluginLoader().load(filePath);
-        m_loaders[filePath] = new QPluginLoader(filePath);   // 保持 loader 存活，实例指针才有效
+        // 接管真正执行 load() 的 loader 存活期（实例指针有效性依赖它）；
+        // 加载失败的记录以 nullptr 占位：同一路径本次会话内不再重复加载
+        m_loaders[filePath] = record.loader;
 
         if (!record.isValid()) {
             record.error = record.error.isEmpty() ? QStringLiteral("加载失败") : record.error;
@@ -146,7 +148,8 @@ void PluginManager::shutdownAll()
         }
     }
     for (auto& rec : m_records) {
-        loader.unload(rec);
+        if (rec.loader)          // 加载失败的记录无库可卸载
+            loader.unload(rec);
     }
     qDeleteAll(m_loaders);
     m_loaders.clear();
