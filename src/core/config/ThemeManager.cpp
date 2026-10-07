@@ -6,6 +6,12 @@
 #include <QDebug>
 #include <QMutexLocker>
 #include <QRegularExpression>
+#include <QJsonDocument>
+#include <QJsonParseError>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QCoreApplication>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -90,6 +96,288 @@ QString ThemeManager::themeDisplayName(const QString& key) const
     QMutexLocker locker(&m_mutex);
     auto it = m_themes.find(key);
     return it != m_themes.end() ? it.value().displayName : key;
+}
+
+// ========== M9 stage4: 自定义主题（JSON 加载 / 市场安装）==========
+
+namespace {
+
+// 把 JSON colors 对象应用到色板（仅覆盖出现的字段；非法颜色值整体失败）
+#define SC_APPLY_PALETTE_COLOR(FIELD) \
+    if (obj.contains(QLatin1String(#FIELD))) { \
+        const QString raw = obj.value(QLatin1String(#FIELD)).toString(); \
+        const QColor c(raw); \
+        if (!c.isValid()) { \
+            if (err) *err = QStringLiteral("非法颜色值 %1: \"%2\"").arg(QLatin1String(#FIELD), raw); \
+            return false; \
+        } \
+        target.FIELD = c; \
+    }
+
+bool applyPaletteColorsJson(const QJsonObject& obj, ThemePalette& target, QString* err)
+{
+    SC_APPLY_PALETTE_COLOR(accentPrimary)
+    SC_APPLY_PALETTE_COLOR(accentHover)
+    SC_APPLY_PALETTE_COLOR(accentPressed)
+    SC_APPLY_PALETTE_COLOR(bgWindow)
+    SC_APPLY_PALETTE_COLOR(bgTitleBar)
+    SC_APPLY_PALETTE_COLOR(bgSideBar)
+    SC_APPLY_PALETTE_COLOR(bgEditor)
+    SC_APPLY_PALETTE_COLOR(bgStatusBar)
+    SC_APPLY_PALETTE_COLOR(bgTabBar)
+    SC_APPLY_PALETTE_COLOR(bgTabActive)
+    SC_APPLY_PALETTE_COLOR(bgTabInactive)
+    SC_APPLY_PALETTE_COLOR(bgInput)
+    SC_APPLY_PALETTE_COLOR(bgActivityBar)
+    SC_APPLY_PALETTE_COLOR(bgHover)
+    SC_APPLY_PALETTE_COLOR(bgPressed)
+    SC_APPLY_PALETTE_COLOR(bgMenu)
+    SC_APPLY_PALETTE_COLOR(bgTooltip)
+    SC_APPLY_PALETTE_COLOR(bgDialog)
+    SC_APPLY_PALETTE_COLOR(fgPrimary)
+    SC_APPLY_PALETTE_COLOR(fgSecondary)
+    SC_APPLY_PALETTE_COLOR(fgDisabled)
+    SC_APPLY_PALETTE_COLOR(fgLineNumber)
+    SC_APPLY_PALETTE_COLOR(fgOnAccent)
+    SC_APPLY_PALETTE_COLOR(fgOnHover)
+    SC_APPLY_PALETTE_COLOR(borderDefault)
+    SC_APPLY_PALETTE_COLOR(borderHover)
+    SC_APPLY_PALETTE_COLOR(borderFocus)
+    SC_APPLY_PALETTE_COLOR(selectionBg)
+    SC_APPLY_PALETTE_COLOR(currentLineBg)
+    SC_APPLY_PALETTE_COLOR(closeBtnHover)
+    SC_APPLY_PALETTE_COLOR(errorColor)
+    SC_APPLY_PALETTE_COLOR(warningColor)
+    SC_APPLY_PALETTE_COLOR(scrollbarBg)
+    SC_APPLY_PALETTE_COLOR(scrollbarHandle)
+    SC_APPLY_PALETTE_COLOR(scrollbarHandleHover)
+    return true;
+}
+
+bool applySyntaxColorsJson(const QJsonObject& obj, ThemePalette::SyntaxColors& target, QString* err)
+{
+    SC_APPLY_PALETTE_COLOR(keyword)
+    SC_APPLY_PALETTE_COLOR(control)
+    SC_APPLY_PALETTE_COLOR(type)
+    SC_APPLY_PALETTE_COLOR(string)
+    SC_APPLY_PALETTE_COLOR(number)
+    SC_APPLY_PALETTE_COLOR(comment)
+    SC_APPLY_PALETTE_COLOR(function)
+    SC_APPLY_PALETTE_COLOR(funcDecl)
+    SC_APPLY_PALETTE_COLOR(preprocessor)
+    SC_APPLY_PALETTE_COLOR(builtin)
+    SC_APPLY_PALETTE_COLOR(decorator)
+    SC_APPLY_PALETTE_COLOR(constant)
+    SC_APPLY_PALETTE_COLOR(tag)
+    SC_APPLY_PALETTE_COLOR(typeDef)
+    SC_APPLY_PALETTE_COLOR(memberVar)
+    SC_APPLY_PALETTE_COLOR(localVar)
+    SC_APPLY_PALETTE_COLOR(yamlKey)
+    SC_APPLY_PALETTE_COLOR(tomlKey)
+    SC_APPLY_PALETTE_COLOR(tomlSection)
+    SC_APPLY_PALETTE_COLOR(doxy)
+    SC_APPLY_PALETTE_COLOR(todo)
+    SC_APPLY_PALETTE_COLOR(headerPath)
+    return true;
+}
+
+#undef SC_APPLY_PALETTE_COLOR
+
+#define SC_COLOR_TO_JSON(FIELD) j.insert(QLatin1String(#FIELD), v.FIELD.name(QColor::HexArgb));
+
+} // namespace
+
+bool ThemeManager::paletteFromJson(const QJsonObject& root, const QString& fallbackKey,
+                                   ThemePalette& out, QString* errorMessage)
+{
+    // 基础色板：缺失字段的回退来源（base 缺省按暗色处理）
+    const QString base = root.value(QLatin1String("base")).toString();
+    ThemePalette p = (base.compare(QLatin1String("light"), Qt::CaseInsensitive) == 0)
+                         ? createLightClassic()
+                         : createBlackDark();
+
+    QString err;
+    const QJsonObject colors = root.value(QLatin1String("colors")).toObject();
+    if (!colors.isEmpty() && !applyPaletteColorsJson(colors, p, &err)) {
+        if (errorMessage) *errorMessage = err;
+        return false;
+    }
+    const QJsonObject syntax = root.value(QLatin1String("syntax")).toObject();
+    if (!syntax.isEmpty() && !applySyntaxColorsJson(syntax, p.syntax, &err)) {
+        if (errorMessage) *errorMessage = err;
+        return false;
+    }
+
+    const QString id = root.value(QLatin1String("id")).toString().trimmed();
+    const QString key = !id.isEmpty() ? id : fallbackKey;
+    if (key.isEmpty()) {
+        if (errorMessage) *errorMessage = QStringLiteral("主题缺少 id 且无法从文件名推导 key");
+        return false;
+    }
+    p.name = key;
+    const QString displayName = root.value(QLatin1String("name")).toString().trimmed();
+    p.displayName = !displayName.isEmpty() ? displayName : key;
+
+    out = p;
+    return true;
+}
+
+QJsonObject ThemeManager::paletteToJson(const ThemePalette& palette)
+{
+    const ThemePalette& v = palette;
+    QJsonObject j;
+    j.insert(QLatin1String("id"), v.name);
+    j.insert(QLatin1String("name"), v.displayName);
+    j.insert(QLatin1String("base"),
+             v.bgEditor.lightness() <= 128 ? QStringLiteral("dark") : QStringLiteral("light"));
+    QJsonObject colors;
+    SC_COLOR_TO_JSON(accentPrimary)
+    SC_COLOR_TO_JSON(accentHover)
+    SC_COLOR_TO_JSON(accentPressed)
+    SC_COLOR_TO_JSON(bgWindow)
+    SC_COLOR_TO_JSON(bgTitleBar)
+    SC_COLOR_TO_JSON(bgSideBar)
+    SC_COLOR_TO_JSON(bgEditor)
+    SC_COLOR_TO_JSON(bgStatusBar)
+    SC_COLOR_TO_JSON(bgTabBar)
+    SC_COLOR_TO_JSON(bgTabActive)
+    SC_COLOR_TO_JSON(bgTabInactive)
+    SC_COLOR_TO_JSON(bgInput)
+    SC_COLOR_TO_JSON(bgActivityBar)
+    SC_COLOR_TO_JSON(bgHover)
+    SC_COLOR_TO_JSON(bgPressed)
+    SC_COLOR_TO_JSON(bgMenu)
+    SC_COLOR_TO_JSON(bgTooltip)
+    SC_COLOR_TO_JSON(bgDialog)
+    SC_COLOR_TO_JSON(fgPrimary)
+    SC_COLOR_TO_JSON(fgSecondary)
+    SC_COLOR_TO_JSON(fgDisabled)
+    SC_COLOR_TO_JSON(fgLineNumber)
+    SC_COLOR_TO_JSON(fgOnAccent)
+    SC_COLOR_TO_JSON(fgOnHover)
+    SC_COLOR_TO_JSON(borderDefault)
+    SC_COLOR_TO_JSON(borderHover)
+    SC_COLOR_TO_JSON(borderFocus)
+    SC_COLOR_TO_JSON(selectionBg)
+    SC_COLOR_TO_JSON(currentLineBg)
+    SC_COLOR_TO_JSON(closeBtnHover)
+    SC_COLOR_TO_JSON(errorColor)
+    SC_COLOR_TO_JSON(warningColor)
+    SC_COLOR_TO_JSON(scrollbarBg)
+    SC_COLOR_TO_JSON(scrollbarHandle)
+    SC_COLOR_TO_JSON(scrollbarHandleHover)
+    j.insert(QLatin1String("colors"), colors);
+
+    QJsonObject syntax;
+#define SC_SYNTAX_TO_JSON(FIELD) syntax.insert(QLatin1String(#FIELD), v.syntax.FIELD.name(QColor::HexArgb));
+    SC_SYNTAX_TO_JSON(keyword)
+    SC_SYNTAX_TO_JSON(control)
+    SC_SYNTAX_TO_JSON(type)
+    SC_SYNTAX_TO_JSON(string)
+    SC_SYNTAX_TO_JSON(number)
+    SC_SYNTAX_TO_JSON(comment)
+    SC_SYNTAX_TO_JSON(function)
+    SC_SYNTAX_TO_JSON(funcDecl)
+    SC_SYNTAX_TO_JSON(preprocessor)
+    SC_SYNTAX_TO_JSON(builtin)
+    SC_SYNTAX_TO_JSON(decorator)
+    SC_SYNTAX_TO_JSON(constant)
+    SC_SYNTAX_TO_JSON(tag)
+    SC_SYNTAX_TO_JSON(typeDef)
+    SC_SYNTAX_TO_JSON(memberVar)
+    SC_SYNTAX_TO_JSON(localVar)
+    SC_SYNTAX_TO_JSON(yamlKey)
+    SC_SYNTAX_TO_JSON(tomlKey)
+    SC_SYNTAX_TO_JSON(tomlSection)
+    SC_SYNTAX_TO_JSON(doxy)
+    SC_SYNTAX_TO_JSON(todo)
+    SC_SYNTAX_TO_JSON(headerPath)
+#undef SC_SYNTAX_TO_JSON
+    j.insert(QLatin1String("syntax"), syntax);
+    return j;
+}
+
+#undef SC_COLOR_TO_JSON
+
+QString ThemeManager::customThemesDir()
+{
+    return QCoreApplication::applicationDirPath() + QStringLiteral("/themes");
+}
+
+int ThemeManager::loadCustomThemesFromDir(const QString& dir)
+{
+    const QDir d(dir);
+    if (!d.exists()) return 0;
+    int loaded = 0;
+    const QStringList files = d.entryList(QStringList() << QStringLiteral("*.json"), QDir::Files);
+    for (const QString& f : files) {
+        QFile file(d.filePath(f));
+        if (!file.open(QIODevice::ReadOnly)) {
+            LOG_WARN_S("ThemeManager", "loadCustomThemes", "无法打开主题文件:" << f);
+            continue;
+        }
+        QJsonParseError perr{};
+        const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &perr);
+        file.close();
+        if (perr.error != QJsonParseError::NoError || !doc.isObject()) {
+            LOG_WARN_S("ThemeManager", "loadCustomThemes",
+                       "主题 JSON 解析失败:" << f << perr.errorString());
+            continue;
+        }
+        const QString key = QFileInfo(f).completeBaseName();
+        ThemePalette p;
+        QString err;
+        if (!paletteFromJson(doc.object(), key, p, &err)) {
+            LOG_WARN_S("ThemeManager", "loadCustomThemes", "主题文件无效:" << f << err);
+            continue;
+        }
+        {
+            QMutexLocker locker(&m_mutex);
+            m_themes[key] = p;
+            m_customKeys.insert(key);
+        }
+        LOG_INFO("[ThemeManager] 自定义主题已加载:" << key.toStdString());
+        ++loaded;
+    }
+    if (loaded > 0)
+        LOG_INFO("[ThemeManager] 自定义主题加载完成，共" << loaded << "个");
+    return loaded;
+}
+
+void ThemeManager::registerCustomTheme(const QString& key, const ThemePalette& palette)
+{
+    QMutexLocker locker(&m_mutex);
+    m_themes[key] = palette;
+    m_customKeys.insert(key);
+    LOG_DEBUG_S("ThemeManager", "registerCustomTheme", "注册自定义主题:" << key);
+}
+
+bool ThemeManager::unregisterTheme(const QString& key)
+{
+    QMutexLocker locker(&m_mutex);
+    if (!m_customKeys.contains(key)) {
+        LOG_WARN_S("ThemeManager", "unregisterTheme", "拒绝注销：非自定义主题:" << key);
+        return false;
+    }
+    if (m_currentKey == key) {
+        LOG_WARN_S("ThemeManager", "unregisterTheme", "拒绝注销：主题正在使用:" << key);
+        return false;
+    }
+    m_themes.remove(key);
+    m_customKeys.remove(key);
+    return true;
+}
+
+bool ThemeManager::isCustomTheme(const QString& key) const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_customKeys.contains(key);
+}
+
+QStringList ThemeManager::customThemeKeys() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_customKeys.values();
 }
 
 // ========== 预设主题工厂 ==========

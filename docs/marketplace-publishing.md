@@ -44,10 +44,40 @@ SoulCove-market 仓库（github.com/sclzj595/SoulCove-market）
 4. **登记**：在 `marketplace.json` 的 `items` 中加一条记录（id/name/version/downloadUrl/fileName 必填），提交推送
 5. **验证**：应用内 `Ctrl+Shift+P` → 「扩展市场：打开」→ 刷新 → 选中 → 安装 → 重启 → 命令面板搜索 `plugin.wordcount.stats` 触发
 
-## 三、注意
+## 三、发布一个主题（M9 stage4）
+
+主题即 JSON 色板文件（`ThemeManager::paletteFromJson` 解析），安装后立即注册、
+设置 → 外观（或命令面板）切换即生效，无需重启。
+
+```json
+{
+  "id": "sunset",                    // 可选，缺省用文件名（去 .json）
+  "name": "日落橙",                   // 显示名，缺省用 id
+  "version": "1.0.0",                // 可选，市场更新检查用
+  "base": "dark",                    // 缺失字段的回退基板：dark（默认）| light
+  "colors": {
+    "accentPrimary": "#E67E22",
+    "bgEditor": "#1e1e1e",
+    "fgPrimary": "#d4d4d4"
+    // …字段名与 ThemePalette 成员一一对应，只写要覆盖的即可
+  },
+  "syntax": {
+    "keyword": "#569cd6"
+    // …字段名与 ThemePalette::SyntaxColors 成员一一对应
+  }
+}
+```
+
+- 颜色值支持 `#RGB/#RRGGBB/#AARRGGBB` 与 Qt 命名色；任一提供的值非法则整个文件拒绝安装
+- 安装落盘到 `applicationDirPath()/themes/<fileName>`，应用启动时自动扫描该目录注册
+- 覆盖安装/卸载由扩展市场面板完成；卸载"正在使用"的主题会先切回默认主题
+- 发布流程与插件一致：把主题 json 上传到 SoulCove-market `themes/` 目录，
+  注册表登记一条 `type: "theme"` 记录即可
+
+## 四、注意
 
 - `fileName` 只取文件名部分（市场面板已做路径穿越防护）
 - 插件已加载时覆盖安装/卸载会被 Windows 文件锁拦截，面板会提示重启后重试
 - ABI：接口 IID 为 `com.soulcove.plugin/1.1`，主版本不匹配的插件将被拒绝加载；
   接口只能新增（向后兼容），破坏性变更必须升 IID 主版本
-- stage1 仅支持 `type: "plugin"` 在线安装；theme/snippet 预留
+- 在线安装支持 `type: "plugin" / "snippet" / "theme"`（M9 stage4 起 theme 补齐）

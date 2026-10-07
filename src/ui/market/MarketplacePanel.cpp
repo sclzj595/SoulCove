@@ -15,6 +15,8 @@
 #include <QDesktopServices>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QJsonDocument>
+#include <QJsonParseError>
 
 MarketplacePanel::MarketplacePanel(QWidget* parent)
     : QWidget(parent)
@@ -160,11 +162,23 @@ void MarketplacePanel::rebuildList(const QString& filter)
 
 QString MarketplacePanel::installedVersion(const MarketItem& it) const
 {
-    if (it.type != QLatin1String("plugin")) return QString();
-    for (const PluginRecord& rec : PluginManager::instance().plugins()) {
-        if (QFileInfo(rec.filePath).fileName().compare(it.fileName, Qt::CaseInsensitive) == 0) {
-            return rec.version;
+    if (it.type == QLatin1String("plugin")) {
+        for (const PluginRecord& rec : PluginManager::instance().plugins()) {
+            if (QFileInfo(rec.filePath).fileName().compare(it.fileName, Qt::CaseInsensitive) == 0) {
+                return rec.version;
+            }
         }
+        return QString();
+    }
+    // M9 stage4: theme 版本 = 已安装主题 JSON 文件中的 version 字段
+    if (it.type == QLatin1String("theme")) {
+        const QString key = themeKeyForItem(it);
+        if (!ThemeManager::instance().isCustomTheme(key)) return QString();
+        QFile f(themesDir() + QStringLiteral("/") + QFileInfo(it.fileName).fileName());
+        if (!f.open(QIODevice::ReadOnly)) return QString();
+        const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+        f.close();
+        return doc.object().value(QLatin1String("version")).toString();
     }
     return QString();
 }
@@ -233,14 +247,34 @@ QString MarketplacePanel::pluginsDir() const
     return QCoreApplication::applicationDirPath() + QStringLiteral("/plugins");
 }
 
+QString MarketplacePanel::themesDir() const
+{
+    return ThemeManager::customThemesDir();
+}
+
+QString MarketplacePanel::themeKeyForItem(const MarketItem& it)
+{
+    // 注册 key 与文件落盘 key 一致：文件名去扩展名（JSON id 优先由解析阶段处理）
+    const QString base = QFileInfo(QFileInfo(it.fileName).fileName()).completeBaseName();
+    return !base.isEmpty() ? base : it.id;
+}
+
 void MarketplacePanel::updateButtons()
 {
     const MarketItem* it = selectedItem();
-    // M9 stage3: plugin 与 snippet 均可安装
+    // M9 stage4: plugin / snippet / theme 均可安装
     const bool installable = it && (it->type == QLatin1String("plugin")
-                                    || it->type == QLatin1String("snippet"));
+                                    || it->type == QLatin1String("snippet")
+                                    || it->type == QLatin1String("theme"));
+    bool uninstallable = false;
+    if (it && it->type == QLatin1String("plugin")) {
+        uninstallable = true;
+    } else if (it && it->type == QLatin1String("theme")) {
+        // 仅自定义（市场安装/本地 themes/ 目录）主题可卸载
+        uninstallable = ThemeManager::instance().isCustomTheme(themeKeyForItem(*it));
+    }
     m_btnInstall->setEnabled(installable);
-    m_btnUninstall->setEnabled(it && it->type == QLatin1String("plugin"));
+    m_btnUninstall->setEnabled(uninstallable);
 }
 
 // ============================================================
@@ -251,8 +285,8 @@ void MarketplacePanel::onInstallClicked()
 {
     const MarketItem* it = selectedItem();
     if (!it) return;
-    if (it->type != QLatin1String("plugin") && it->type != QLatin1String("snippet")) {
-        // M9 stage3: theme 需要宿主侧自定义主题文件加载器（ThemeManager 尚无该机制），维持占位
+    if (it->type != QLatin1String("plugin") && it->type != QLatin1String("snippet")
+        && it->type != QLatin1String("theme")) {
         setStatus(tr("「%1」类型的在线安装将在后续版本支持").arg(it->type));
         return;
     }
@@ -321,6 +355,55 @@ void MarketplacePanel::onInstallClicked()
             return;
         }
 
+        // ===== M9 stage4: 主题安装（下载 → JSON 解析校验 → 落盘 themes/ → 注册热切换）=====
+        if (it->type == QLatin1String("theme")) {
+            QJsonParseError perr{};
+            const QJsonDocument doc = QJsonDocument::fromJson(data, &perr);
+            if (perr.error != QJsonParseError::NoError || !doc.isObject()) {
+                setStatus(tr("✗ 主题文件解析失败：%1")
+                              .arg(perr.error != QJsonParseError::NoError
+                                       ? perr.errorString()
+                                       : tr("内容不是 JSON 对象")));
+                return;
+            }
+            const QString safeName = QFileInfo(it->fileName).fileName();
+            const QString key = themeKeyForItem(*it);
+            if (safeName.isEmpty() || key.isEmpty()) {
+                setStatus(tr("✗ 注册表 fileName 无效"));
+                return;
+            }
+            ThemePalette palette;
+            QString err;
+            if (!ThemeManager::paletteFromJson(doc.object(), key, palette, &err)) {
+                setStatus(tr("✗ 主题格式无效：%1").arg(err));
+                return;
+            }
+
+            QDir().mkpath(themesDir());
+            const QString target = themesDir() + QStringLiteral("/") + safeName;
+            if (QFileInfo::exists(target) && !QFile::remove(target)) {
+                setStatus(tr("✗ 旧版本主题文件删除失败: %1").arg(target));
+                return;
+            }
+            QFile out(target);
+            if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                setStatus(tr("✗ 写入失败: %1").arg(target));
+                return;
+            }
+            out.write(data);
+            out.close();
+
+            ThemeManager::instance().registerCustomTheme(key, palette);
+            if (ThemeManager::instance().currentTheme() == key)
+                ThemeManager::instance().switchTheme(key);  // 覆盖更新当前主题时立即刷新
+
+            setStatus(tr("✓ 主题「%1」已安装——设置 → 外观 或命令面板中切换后生效")
+                          .arg(palette.displayName));
+            LOG_INFO("[MarketplacePanel] 主题已安装:" << key.toStdString());
+            rebuildList(m_searchEdit->text());
+            return;
+        }
+
         // ===== 插件安装 =====
         // 文件名安全：只取文件名部分，拒绝路径穿越
         const QString safeName = QFileInfo(it->fileName).fileName();
@@ -354,8 +437,32 @@ void MarketplacePanel::onUninstallClicked()
 {
     const MarketItem* it = selectedItem();
     if (!it) return;
+
+    // ===== M9 stage4: 主题卸载（当前正在使用时先切回默认主题）=====
+    if (it->type == QLatin1String("theme")) {
+        const QString key = themeKeyForItem(*it);
+        if (!ThemeManager::instance().isCustomTheme(key)) {
+            setStatus(tr("「%1」不是可卸载的自定义主题").arg(it->name));
+            return;
+        }
+        if (ThemeManager::instance().currentTheme() == key)
+            ThemeManager::instance().switchTheme(QStringLiteral("purple"));  // 先切走再注销
+        if (!ThemeManager::instance().unregisterTheme(key)) {
+            setStatus(tr("✗ 主题注销失败（可能仍在使用中）"));
+            return;
+        }
+        const QString target = themesDir() + QStringLiteral("/")
+                                   + QFileInfo(it->fileName).fileName();
+        if (QFileInfo::exists(target) && !QFile::remove(target))
+            setStatus(tr("✓ 主题已注销，但文件删除失败（可手动删除）: %1").arg(target));
+        else
+            setStatus(tr("✓ 已卸载主题「%1」").arg(it->name));
+        rebuildList(m_searchEdit->text());
+        return;
+    }
+
     if (it->type != QLatin1String("plugin")) {
-        setStatus(tr("stage1 暂只支持插件卸载"));
+        setStatus(tr("仅支持插件与自定义主题卸载"));
         return;
     }
 

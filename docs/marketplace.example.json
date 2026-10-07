@@ -19,6 +19,16 @@
       "description": "最小合规插件示例：注册 plugin.hello.greet 命令，演示插件生命周期与事件订阅。",
       "downloadUrl": "https://github.com/sclzj595/SoulCove-market/raw/main/plugins/libhello_plugin.dll",
       "fileName": "libhello_plugin.dll"
+    },
+    {
+      "id": "com.soulcove.theme.sunset",
+      "name": "日落橙主题",
+      "version": "1.0.0",
+      "type": "theme",
+      "author": "scStudio",
+      "description": "暖橙强调色的暗色主题示例：安装后在 设置 → 外观 或命令面板切换（M9 stage4 起支持主题在线安装/卸载）。",
+      "downloadUrl": "https://github.com/sclzj595/SoulCove-market/raw/main/themes/sunset.json",
+      "fileName": "sunset.json"
     }
   ]
 }

@@ -145,6 +145,8 @@ Widget::Widget(const ProductConfig& config, QWidget *parent)
 
     // 1.5 初始化主题管理器，应用当前主题
     auto& tm = ThemeManager::instance();
+    // M9 stage4: 先扫描注册自定义主题（themes/*.json），否则已保存的自定义主题 key 会找不到
+    tm.loadCustomThemesFromDir(ThemeManager::customThemesDir());
     QString savedTheme = ConfigManager::instance().theme();
     if (!savedTheme.isEmpty() && tm.themeKeys().contains(savedTheme))
         tm.switchTheme(savedTheme);  // switchTheme已修复：始终应用QSS

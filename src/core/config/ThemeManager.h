@@ -4,8 +4,10 @@
 #include <QObject>
 #include <QString>
 #include <QMap>
+#include <QSet>
 #include <QColor>
 #include <QMutex>
+#include <QJsonObject>
 
 #include "interfaces/core/IThemeManager.h"
 
@@ -136,6 +138,39 @@ public:
     static ThemePalette createLightClassic();   // 亮色经典主题（蓝调）
     static ThemePalette createPinkLight();      // 白粉主题（粉紫调）
 
+    // ===== M9 stage4: 自定义主题（市场安装 / 本地 themes/ 目录加载）=====
+
+    /// 从 JSON 对象解析色板。
+    /// 期望格式：{ "id"?, "name"?, "version"?, "base"?: "dark"|"light",
+    ///             "colors": { <ThemePalette 字段名>: "#RRGGBB[AA]" },
+    ///             "syntax": { <SyntaxColors 字段名>: "#RRGGBB[AA]" } }
+    /// 缺失字段回退 base 基础色板（默认暗色）；提供的颜色值非法则解析失败。
+    /// fallbackKey：JSON 未提供 id 时使用的主题 key（通常为文件名去扩展名）。
+    static bool paletteFromJson(const QJsonObject& root, const QString& fallbackKey,
+                                ThemePalette& out, QString* errorMessage = nullptr);
+
+    /// 色板导出为 JSON（市场发布/主题分享用；颜色统一 #AARRGGBB 保留透明度）
+    static QJsonObject paletteToJson(const ThemePalette& palette);
+
+    /// 自定义主题标准目录（applicationDirPath()/themes）
+    static QString customThemesDir();
+
+    /// 扫描目录下全部 *.json 自定义主题并注册（key=文件名去扩展名，JSON id 优先）。
+    /// 返回成功注册数量；单个文件失败仅告警不中断。
+    int loadCustomThemesFromDir(const QString& dir);
+
+    /// 注册自定义主题（标记为可卸载；内置主题请使用 registerTheme）
+    void registerCustomTheme(const QString& key, const ThemePalette& palette);
+
+    /// 注销自定义主题（内置主题拒绝；key 为当前主题时拒绝，需先切换走）
+    bool unregisterTheme(const QString& key);
+
+    /// 是否为自定义（非内置）主题
+    bool isCustomTheme(const QString& key) const;
+
+    /// 自定义主题 key 列表
+    QStringList customThemeKeys() const;
+
 signals:
     void themeChanged(const QString& themeKey);
 
@@ -145,6 +180,7 @@ private:
     Q_DISABLE_COPY(ThemeManager)
 
     QMap<QString, ThemePalette> m_themes;
+    QSet<QString> m_customKeys;     ///< M9 stage4: 自定义（可卸载）主题 key 集合
     QString m_currentKey;
     mutable QMutex m_mutex;     // 线程安全保护
 };

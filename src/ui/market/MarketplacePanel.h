@@ -38,6 +38,8 @@ private:
     void updateButtons();
     const MarketItem* selectedItem() const;
     QString pluginsDir() const;
+    QString themesDir() const;                 ///< M9 stage4: 自定义主题目录
+    static QString themeKeyForItem(const MarketItem& it);  ///< M9 stage4: 市场条目 → 主题 key
     void setStatus(const QString& text);
     // M9 stage3: 版本比较与更新检查
     QString installedVersion(const MarketItem& it) const;  ///< 已安装版本（未安装返回空）
