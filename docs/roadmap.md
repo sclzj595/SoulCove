@@ -150,9 +150,11 @@ Real VSCode Workspace:
 ### Milestone 6 — Marketplace
 
 Extension marketplace. Users download:
-- Plugins
-- Themes
-- Snippets
+- Plugins — **live** (online install/uninstall, update check)
+- Themes — **live** (stage 4: JSON palette install with hot-switch;
+  first theme `sunset` published in the
+  [SoulCove-market](https://github.com/sclzj595/SoulCove-market) registry)
+- Snippets — planned (registry `type: "snippet"` import exists)
 - Languages
 - Debuggers
 

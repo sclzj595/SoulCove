@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Marketplace (stage 4)**: theme online install / uninstall. Themes are JSON
+  palette files (`type: "theme"` registry entries); installing registers the
+  palette hot-switch (no restart), uninstalling the in-use theme switches back
+  to the default first. Startup autoloads custom palettes from
+  `applicationDirPath()/themes/`. First marketplace theme published:
+  `sunset`（日落橙）in [SoulCove-market](https://github.com/sclzj595/SoulCove-market).
+
+### Fixed
+- **Plugins**: unload ownership — `PluginLoader::load` leaked the real
+  `QPluginLoader` while `PluginManager` kept a second, never-loaded instance,
+  so shutdown could fail with "The plugin was not loaded". The real loader is
+  now carried by `PluginRecord` and adopted by `PluginManager::m_loaders`.
+- **Themes**: `paletteToJson` wrote syntax colors into the JSON root object
+  instead of the `syntax` child (exported themes lost all syntax colors).
+
 ### Changed
 - **Branding**: unified project naming to **SoulCove**. Documentation, README
   and `Files/` history documents renamed from `scNotebook*` to `SoulCove*`.
