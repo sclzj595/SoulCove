@@ -182,6 +182,8 @@ Widget::Widget(const ProductConfig& config, QWidget *parent)
     // 5. 提前创建补全器（解决时序问题：文件加载时文本变更信号早于懒加载）
     m_currentTextEdit = nullptr;
     auto& cfg = ConfigManager::instance();
+    // M9: 启动时应用内置网络代理（在扩展市场首次拉取 registry 之前，避免未开系统代理时超时）
+    ConfigManager::applyNetworkProxy();
     if (m_productConfig.completion && cfg.showCompletion()) {
         auto* completerImpl = new TextCompleter(this);
         completerImpl->setWindowFlags(completerImpl->windowFlags() | Qt::WindowStaysOnTopHint);

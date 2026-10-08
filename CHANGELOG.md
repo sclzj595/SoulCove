@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Network**: built-in HTTP proxy setting (Settings → Network). Marketplace
+  and AI requests honor the configured proxy and no longer depend on the
+  system proxy toggle; when disabled, in-app networking connects directly
+  (no system-proxy fallback). Applied at startup and live on change via
+  `QNetworkProxy::setApplicationProxy`.
 - **Marketplace (stage 4)**: theme online install / uninstall. Themes are JSON
   palette files (`type: "theme"` registry entries); installing registers the
   palette hot-switch (no restart), uninstalling the in-use theme switches back

@@ -108,6 +108,7 @@ void SettingsPage::setupUI()
     m_categoryList->addItem(tr("Markdown"));   // P3-M02 子项2
     m_categoryList->addItem(tr("插件"));       // M7: 插件管理
     m_categoryList->addItem(tr("AI 助手"));    // M8: AI 服务商配置
+    m_categoryList->addItem(tr("网络"));       // M9: 网络代理配置
     m_categoryList->setCurrentRow(0);
 
     // M8 收口: showCategory 使用的枚举→行映射锚点（列表项顺序与 SettingsCategory 一致）
@@ -170,6 +171,10 @@ void SettingsPage::setupUI()
     auto* aiPage = new QWidget();
     createAIPage(aiPage);
 
+    // M9: 网络代理配置页
+    auto* networkPage = new QWidget();
+    createNetworkPage(networkPage);
+
     m_pageStack->addWidget(appearancePage);
     m_pageStack->addWidget(editorPage);
     m_pageStack->addWidget(terminalPage);
@@ -178,7 +183,7 @@ void SettingsPage::setupUI()
     // 快捷键页面（独立创建，返回 QWidget 指针）
     // 注意：添加顺序必须与 m_categoryList 的项目顺序一致
     // 分类列表顺序：外观(0) 编辑器(1) 终端(2) 智能提示(3) 快捷键(4) LSP(5) 构建(6) Markdown(7)
-    //               插件(8) AI 助手(9)
+    //               插件(8) AI 助手(9) 网络(10)
     createShortcutsPage();
 
     m_pageStack->addWidget(lspPage);
@@ -186,6 +191,7 @@ void SettingsPage::setupUI()
     m_pageStack->addWidget(markdownPage);
     m_pageStack->addWidget(pluginsPage);
     m_pageStack->addWidget(aiPage);
+    m_pageStack->addWidget(networkPage);
 
     // 用滚动区域包裹
     auto* scrollArea = new QScrollArea(this);
@@ -1317,6 +1323,71 @@ void SettingsPage::createMarkdownPage(QWidget* page)
 }
 
 // ============================================================
+// M9: 网络代理配置页
+// ============================================================
+
+void SettingsPage::createNetworkPage(QWidget* page)
+{
+    auto* layout = new QVBoxLayout(page);
+    layout->setContentsMargins(28, 24, 28, 24);
+    layout->setSpacing(12);
+
+    auto* titleLabel = new QLabel(tr("网络"), page);
+    titleLabel->setObjectName(QStringLiteral("settingsMainTitle"));
+    layout->addWidget(titleLabel);
+
+    auto* hintLabel = new QLabel(tr(
+        "配置应用内置 HTTP 代理。扩展市场与 AI 助手的网络请求将经由代理服务器，"
+        "不依赖系统代理开关（Windows ProxyEnable）。"), page);
+    hintLabel->setObjectName(QStringLiteral("settingsHint"));
+    hintLabel->setWordWrap(true);
+    layout->addWidget(hintLabel);
+
+    // --- 代理设置 ---
+    auto* proxySection = new QLabel(tr("HTTP 代理"), page);
+    proxySection->setObjectName(QStringLiteral("settingsSectionTitle"));
+    layout->addWidget(proxySection);
+
+    m_proxyEnabledCheck = new QCheckBox(tr("启用 HTTP 代理"), page);
+    layout->addWidget(m_proxyEnabledCheck);
+
+    auto* addrLayout = new QHBoxLayout();
+    auto* hostLabel = new QLabel(tr("主机:"), page);
+    hostLabel->setFixedWidth(120);
+    m_proxyHostEdit = new QLineEdit(page);
+    m_proxyHostEdit->setPlaceholderText(QStringLiteral("127.0.0.1"));
+    m_proxyHostEdit->setMaximumWidth(220);
+    auto* portLabel = new QLabel(tr("端口:"), page);
+    m_proxyPortSpin = new QSpinBox(page);
+    m_proxyPortSpin->setRange(1, 65535);
+    m_proxyPortSpin->setValue(7890);
+    addrLayout->addWidget(hostLabel);
+    addrLayout->addWidget(m_proxyHostEdit);
+    addrLayout->addWidget(portLabel);
+    addrLayout->addWidget(m_proxyPortSpin);
+    addrLayout->addStretch();
+    layout->addLayout(addrLayout);
+
+    auto* proxyHint = new QLabel(tr(
+        "启用后扩展市场/AI 请求走此代理；关闭时应用内网络直连，"
+        "且不再跟随系统代理设置。修改后立即生效，无需重启。"), page);
+    proxyHint->setObjectName(QStringLiteral("settingsHint"));
+    proxyHint->setWordWrap(true);
+    layout->addWidget(proxyHint);
+
+    layout->addStretch();
+
+    // 启用状态联动（输入框随开关置灰）
+    connect(m_proxyEnabledCheck, &QCheckBox::toggled, m_proxyHostEdit, &QWidget::setEnabled);
+    connect(m_proxyEnabledCheck, &QCheckBox::toggled, m_proxyPortSpin, &QWidget::setEnabled);
+
+    // 配置写入
+    connect(m_proxyEnabledCheck, &QCheckBox::toggled, this, &SettingsPage::onProxyEnabledToggled);
+    connect(m_proxyHostEdit, &QLineEdit::editingFinished, this, &SettingsPage::onProxyHostEdited);
+    connect(m_proxyPortSpin, &QSpinBox::valueChanged, this, &SettingsPage::onProxyPortChanged);
+}
+
+// ============================================================
 // P3-M02 子项2: Markdown CSS 槽函数
 // ============================================================
 
@@ -2015,6 +2086,18 @@ void SettingsPage::loadCurrentConfig()
     bool lspAutoStart = config.getValue("LSP/autoStart", true).toBool();
     m_lspAutoStartCheck->setChecked(lspAutoStart);
 
+    // M9: 网络代理（QSignalBlocker 防止回填触发写盘）
+    {
+        QSignalBlocker b1(m_proxyEnabledCheck);
+        QSignalBlocker b2(m_proxyHostEdit);
+        QSignalBlocker b3(m_proxyPortSpin);
+        m_proxyEnabledCheck->setChecked(config.proxyEnabled());
+        m_proxyHostEdit->setText(config.proxyHost());
+        m_proxyPortSpin->setValue(config.proxyPort());
+        m_proxyHostEdit->setEnabled(config.proxyEnabled());
+        m_proxyPortSpin->setEnabled(config.proxyEnabled());
+    }
+
     // P1 C05-2: 构建配置（使用 ConfigManager 专用方法）
     QString buildQtPath = config.qtPrefixPath();
     if (!buildQtPath.isEmpty()) {
@@ -2316,6 +2399,26 @@ void SettingsPage::onLspAutoStartToggled(bool checked)
 {
     ConfigManager::instance().setValue(QStringLiteral("LSP/autoStart"), checked);
     emit configChanged();
+}
+
+// ========== M9: 网络代理配置槽函数 ==========
+
+void SettingsPage::onProxyEnabledToggled(bool checked)
+{
+    ConfigManager::instance().setProxyEnabled(checked);
+    ConfigManager::applyNetworkProxy();  // 立即生效
+}
+
+void SettingsPage::onProxyHostEdited()
+{
+    ConfigManager::instance().setProxyHost(m_proxyHostEdit->text().trimmed());
+    ConfigManager::applyNetworkProxy();
+}
+
+void SettingsPage::onProxyPortChanged(int port)
+{
+    ConfigManager::instance().setProxyPort(port);
+    ConfigManager::applyNetworkProxy();
 }
 
 // ========== P1 C05-2: 构建配置槽函数 ==========

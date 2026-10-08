@@ -124,6 +124,20 @@ public:
     bool spellCheckEnabled() const;
     void setSpellCheckEnabled(bool enabled);
 
+    // === M9: 应用内置 HTTP 代理（扩展市场/AI 网络请求，不依赖系统代理开关）===
+    bool proxyEnabled() const;       // 是否启用内置 HTTP 代理（默认 false）
+    QString proxyHost() const;       // 代理主机（默认 "127.0.0.1"）
+    int proxyPort() const;           // 代理端口（默认 7890，1~65535）
+    void setProxyEnabled(bool enable);
+    void setProxyHost(const QString& host);
+    void setProxyPort(int port);
+
+    /// 将 Network/proxy* 配置应用到全局网络层（QNetworkProxy::setApplicationProxy）。
+    /// 禁用时显式 NoProxy：Qt 默认会跟随系统代理，显式关闭后应用内网络
+    /// （扩展市场 registry/主题包下载、AI 请求）不再依赖系统代理开关。
+    /// 启动时与设置页变更后调用。
+    static void applyNetworkProxy();
+
     // === P3-M02 子项1: Markdown TOC 折叠状态持久化（按文件路径记忆，上限 20 个文件）===
     // 序列化格式：mdToc/collapsedState = JSON 对象字符串
     // 每个键为文件路径，值为折叠项行号数组：{ "/path/to/file.md": [10, 25, 40] }

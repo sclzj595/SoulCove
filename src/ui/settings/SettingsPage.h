@@ -36,7 +36,8 @@ public:
         Build = 6,      // P1 C05-2: 构建配置页
         Markdown = 7,   // P3-M02 子项2: Markdown 自定义 CSS 配置页
         Plugins = 8,    // M7: 插件管理页
-        AI = 9          // M8: AI 助手服务商配置页
+        AI = 9,         // M8: AI 助手服务商配置页
+        Network = 10    // M9: 网络代理配置页
     };
     Q_ENUM(SettingsCategory)
 
@@ -125,6 +126,10 @@ private slots:
     void onMdCssResetClicked();
     // M7: 插件管理页槽函数
     void onRescanPlugins();
+    // M9: 网络代理配置页槽函数
+    void onProxyEnabledToggled(bool checked);
+    void onProxyHostEdited();      // editingFinished 触发（避免逐键写盘）
+    void onProxyPortChanged(int port);
 
 private:
     void setupUI();
@@ -137,6 +142,7 @@ private:
     void createBuildPage(QWidget* page);  // P1 C05-2: 构建配置页
     void createMarkdownPage(QWidget* page);  // P3-M02 子项2: Markdown 自定义 CSS 配置页
     void createPluginsPage(QWidget* page);   // M7: 插件管理页
+    void createNetworkPage(QWidget* page);   // M9: 网络代理配置页
     void createShortcutsPage();
 
     /// M7: 刷新插件表格（从 PluginManager 读取当前加载清单）
@@ -270,6 +276,11 @@ private:
     QTableWidget* m_pluginTable = nullptr;       ///< 插件清单表
     QLabel*       m_pluginSummaryLabel = nullptr;///< 加载摘要（x/y 成功）
     QPushButton*  m_pluginRescanBtn = nullptr;   ///< 重新扫描按钮
+
+    // === M9: 网络代理 ===
+    QCheckBox* m_proxyEnabledCheck = nullptr;    ///< 启用 HTTP 代理
+    QLineEdit* m_proxyHostEdit = nullptr;        ///< 代理主机
+    QSpinBox*  m_proxyPortSpin = nullptr;        ///< 代理端口
 
     /// 快捷键数据结构
     struct ShortcutItem {

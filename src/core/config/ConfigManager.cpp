@@ -9,6 +9,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QNetworkProxy>  // M9: 应用内置 HTTP 代理
 
 // ========== 单例实现 ==========
 ConfigManager& ConfigManager::instance()
@@ -243,6 +244,58 @@ void ConfigManager::setLspJsPath(const QString& path)
 void ConfigManager::setLspAutoStart(bool enable)
 {
     setValue("LSP/autoStart", enable);
+}
+
+// === M9: 应用内置 HTTP 代理 ===
+
+bool ConfigManager::proxyEnabled() const
+{
+    return getValue("Network/proxyEnabled", false).toBool();
+}
+
+QString ConfigManager::proxyHost() const
+{
+    return getValue("Network/proxyHost", QStringLiteral("127.0.0.1")).toString();
+}
+
+int ConfigManager::proxyPort() const
+{
+    int port = getValue("Network/proxyPort", 7890).toInt();
+    if (port < 1 || port > 65535) port = 7890;
+    return port;
+}
+
+void ConfigManager::setProxyEnabled(bool enable)
+{
+    setValue("Network/proxyEnabled", enable);
+}
+
+void ConfigManager::setProxyHost(const QString& host)
+{
+    setValue("Network/proxyHost", host);
+}
+
+void ConfigManager::setProxyPort(int port)
+{
+    if (port < 1 || port > 65535) port = 7890;
+    setValue("Network/proxyPort", port);
+}
+
+void ConfigManager::applyNetworkProxy()
+{
+    if (instance().proxyEnabled()) {
+        QNetworkProxy proxy(QNetworkProxy::HttpProxy,
+                            instance().proxyHost(),
+                            static_cast<quint16>(instance().proxyPort()));
+        QNetworkProxy::setApplicationProxy(proxy);
+        LOG_INFO_S("ConfigManager", "applyNetworkProxy",
+                   "HTTP 代理已启用:" << instance().proxyHost() << ":" << instance().proxyPort());
+    } else {
+        // 显式 NoProxy：覆盖 Qt 默认的"跟随系统代理"行为，
+        // 未配置代理时应用内网络直连（系统代理开关 ProxyEnable 不再影响）
+        QNetworkProxy::setApplicationProxy(QNetworkProxy(QNetworkProxy::NoProxy));
+        LOG_INFO_S("ConfigManager", "applyNetworkProxy", "代理未启用，应用内网络直连");
+    }
 }
 
 // === C03-5: 导航栈持久化 ===

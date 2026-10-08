@@ -247,6 +247,34 @@
 <context>
     <name>SettingsPage</name>
     <message>
+        <source>网络</source>
+        <translation>Network</translation>
+    </message>
+    <message>
+        <source>配置应用内置 HTTP 代理。扩展市场与 AI 助手的网络请求将经由代理服务器，不依赖系统代理开关（Windows ProxyEnable）。</source>
+        <translation>Configure the built-in HTTP proxy. Marketplace and AI assistant requests go through the proxy server, independent of the system proxy toggle (Windows ProxyEnable).</translation>
+    </message>
+    <message>
+        <source>HTTP 代理</source>
+        <translation>HTTP Proxy</translation>
+    </message>
+    <message>
+        <source>启用 HTTP 代理</source>
+        <translation>Enable HTTP proxy</translation>
+    </message>
+    <message>
+        <source>主机:</source>
+        <translation>Host:</translation>
+    </message>
+    <message>
+        <source>端口:</source>
+        <translation>Port:</translation>
+    </message>
+    <message>
+        <source>启用后扩展市场/AI 请求走此代理；关闭时应用内网络直连，且不再跟随系统代理设置。修改后立即生效，无需重启。</source>
+        <translation>When enabled, marketplace/AI requests go through this proxy; when disabled, in-app network connects directly and no longer follows the system proxy. Changes take effect immediately, no restart needed.</translation>
+    </message>
+    <message>
         <source>搜索设置...</source>
         <translation>Search settings...</translation>
     </message>
